@@ -451,8 +451,16 @@ curl -X POST "https://api.example.com/Api/v1/Upload/GetMultipartPartUrls" \
 {
   "Result": {
     "Parts": [
-      { "PartNumber": 1, "Url": "https://s3.../part1?X-Amz-...", "Expires": 3600 },
-      { "PartNumber": 2, "Url": "https://s3.../part2?X-Amz-...", "Expires": 3600 }
+      {
+        "PartNumber": 1,
+        "Url": "https://s3.../part1?X-Amz-...",
+        "Expires": 3600
+      },
+      {
+        "PartNumber": 2,
+        "Url": "https://s3.../part2?X-Amz-...",
+        "Expires": 3600
+      }
     ]
   }
 }
@@ -460,12 +468,12 @@ curl -X POST "https://api.example.com/Api/v1/Upload/GetMultipartPartUrls" \
 
 **Batch Request Parametreleri:**
 
-| Alan          | Tip      | Zorunlu | Aciklama                                                          |
-| ------------- | -------- | ------- | ----------------------------------------------------------------- |
-| `Key`         | string   | Evet    | Yuklenen dosyanin key'i                                           |
-| `UploadId`    | string   | Evet    | CreateMultipartUpload'dan alinan UploadId                         |
-| `TotalParts`  | number   | *       | Toplam part sayisi (1-10000). PartNumbers ile birlikte kullanilamaz |
-| `PartNumbers` | number[] | *       | Belirli part numaralari. TotalParts ile birlikte kullanilamaz      |
+| Alan          | Tip      | Zorunlu | Aciklama                                                            |
+| ------------- | -------- | ------- | ------------------------------------------------------------------- |
+| `Key`         | string   | Evet    | Yuklenen dosyanin key'i                                             |
+| `UploadId`    | string   | Evet    | CreateMultipartUpload'dan alinan UploadId                           |
+| `TotalParts`  | number   | \*      | Toplam part sayisi (1-10000). PartNumbers ile birlikte kullanilamaz |
+| `PartNumbers` | number[] | \*      | Belirli part numaralari. TotalParts ile birlikte kullanilamaz       |
 
 > `TotalParts` veya `PartNumbers` bir tanesinin gonderilmesi zorunludur. `PartNumbers` retry senaryolari icin kullanilir — sadece basarisiz olan partlarin URL'leri yeniden alinir.
 
