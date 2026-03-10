@@ -3,6 +3,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -21,6 +22,7 @@ import { CloudS3Service } from './cloud.s3.service';
 import { CloudMetadataService } from './cloud.metadata.service';
 import { KeyBuilder } from '@common/helpers/cast.helper';
 import { GetStorageOwnerId } from './cloud.context';
+import { EnsureTrailingSlash } from './cloud.utils';
 
 @Injectable()
 export class CloudObjectService {
@@ -143,42 +145,116 @@ export class CloudObjectService {
   }
 
   async Move(
-    { SourceKeys, DestinationKey }: CloudMoveRequestModel,
+    { Items, DestinationKey }: CloudMoveRequestModel,
     User: UserContext,
   ): Promise<boolean> {
+    const bucket = this.CloudS3Service.GetBuckets().Storage;
     try {
-      for await (const sourceKey of SourceKeys) {
-        const sourceFullKey = KeyBuilder([GetStorageOwnerId(User), sourceKey]);
+      for (const item of Items) {
+        if (item.IsDirectory) {
+          await this.MoveDirectory(item.Key, DestinationKey, User);
+        } else {
+          const sourceFullKey = KeyBuilder([GetStorageOwnerId(User), item.Key]);
+          const targetFullKey = KeyBuilder([
+            GetStorageOwnerId(User),
+            DestinationKey,
+            item.Key.split('/').pop() || '',
+          ]);
 
-        const targetFullKey = KeyBuilder([
-          GetStorageOwnerId(User),
-          DestinationKey,
-          sourceKey.split('/').pop() || '',
-        ]);
-        const copySource = `${this.CloudS3Service.GetBuckets().Storage}/${sourceFullKey}`;
+          await this.CloudS3Service.Send(
+            new CopyObjectCommand({
+              Bucket: bucket,
+              CopySource: `${bucket}/${sourceFullKey}`,
+              Key: targetFullKey,
+            }),
+          );
 
-        await this.CloudS3Service.Send(
-          new CopyObjectCommand({
-            Bucket: this.CloudS3Service.GetBuckets().Storage,
-            CopySource: copySource,
-            Key: targetFullKey,
-          }),
-        );
-
-        await this.CloudS3Service.Send(
-          new DeleteObjectCommand({
-            Bucket: this.CloudS3Service.GetBuckets().Storage,
-            Key: sourceFullKey,
-          }),
-        );
+          await this.CloudS3Service.Send(
+            new DeleteObjectCommand({
+              Bucket: bucket,
+              Key: sourceFullKey,
+            }),
+          );
+        }
       }
     } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
       if (this.CloudS3Service.IsNotFoundError(error)) {
         throw new HttpException(Codes.Error.Cloud.FILE_NOT_FOUND, 404);
       }
       throw error;
     }
     return true;
+  }
+
+  private async MoveDirectory(
+    sourceKey: string,
+    destinationKey: string,
+    User: UserContext,
+  ): Promise<void> {
+    const bucket = this.CloudS3Service.GetBuckets().Storage;
+    const sourcePrefixFull = EnsureTrailingSlash(
+      KeyBuilder([GetStorageOwnerId(User), sourceKey]),
+    );
+    const dirName = sourceKey.split('/').filter(Boolean).pop() || '';
+    const targetPrefixFull = EnsureTrailingSlash(
+      KeyBuilder([GetStorageOwnerId(User), destinationKey, dirName]),
+    );
+
+    let continuationToken: string | undefined = undefined;
+    let movedObjects = 0;
+
+    do {
+      const listResp = await this.CloudS3Service.Send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: sourcePrefixFull,
+          ContinuationToken: continuationToken,
+          MaxKeys: 1000,
+        }),
+      );
+
+      const contents = listResp.Contents || [];
+      if (!contents.length && !listResp.IsTruncated && movedObjects === 0) {
+        throw new HttpException(Codes.Error.Cloud.FILE_NOT_FOUND, 404);
+      }
+
+      for (const content of contents) {
+        if (!content.Key) {
+          continue;
+        }
+
+        const suffix = content.Key.startsWith(sourcePrefixFull)
+          ? content.Key.slice(sourcePrefixFull.length)
+          : '';
+        const targetKey = suffix
+          ? targetPrefixFull + suffix
+          : targetPrefixFull.slice(0, -1);
+
+        await this.CloudS3Service.Send(
+          new CopyObjectCommand({
+            Bucket: bucket,
+            CopySource: `${bucket}/${content.Key}`,
+            Key: targetKey,
+          }),
+        );
+
+        await this.CloudS3Service.Send(
+          new DeleteObjectCommand({
+            Bucket: bucket,
+            Key: content.Key,
+          }),
+        );
+
+        movedObjects++;
+      }
+
+      continuationToken = listResp.IsTruncated
+        ? listResp.NextContinuationToken
+        : undefined;
+    } while (continuationToken);
   }
 
   async Delete(

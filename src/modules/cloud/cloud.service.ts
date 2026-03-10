@@ -396,7 +396,7 @@ export class CloudService {
   //#region Move
 
   async Move(
-    { SourceKeys, DestinationKey }: CloudMoveRequestModel,
+    { Items, DestinationKey }: CloudMoveRequestModel,
     User: UserContext,
     idempotencyKey?: string,
   ): Promise<boolean> {
@@ -409,13 +409,13 @@ export class CloudService {
       return cached;
     }
     const result = await this.CloudObjectService.Move(
-      { SourceKeys, DestinationKey },
+      { Items, DestinationKey },
       User,
     );
-    for (const sourceKey of SourceKeys) {
+    for (const item of Items) {
       await this.CloudListService.InvalidateThumbnailCacheForObjectKey(
         GetStorageOwnerId(User),
-        sourceKey,
+        item.Key,
       );
     }
     if (DestinationKey) {
@@ -433,13 +433,13 @@ export class CloudService {
     await this.CloudListService.InvalidateListCache(GetStorageOwnerId(User));
 
     // Notify user about file move
-    const movedNames = SourceKeys.map((k) => k.split('/').pop() || k);
+    const movedNames = Items.map((i) => i.Key.split('/').pop() || i.Key);
     this.NotificationService.EmitToUser(
       User.Id,
       NotificationType.FILE_MOVED,
       'Files Moved',
       `${movedNames.length} item(s) moved to "${DestinationKey || 'root'}".`,
-      { SourceKeys, DestinationKey, Count: SourceKeys.length },
+      { Items, DestinationKey, Count: Items.length },
     );
 
     return result;

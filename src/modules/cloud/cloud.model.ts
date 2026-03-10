@@ -697,13 +697,25 @@ export class CloudAbortMultipartUploadRequestModel {
   UploadId: string;
 }
 
-export class CloudMoveRequestModel {
+export class CloudMoveItemModel {
   @ApiProperty()
   @IsNotEmpty()
+  @Transform(({ value }) => S3KeyConverter(value))
+  Key: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsBoolean()
+  IsDirectory?: boolean;
+}
+
+export class CloudMoveRequestModel {
+  @ApiProperty({ type: CloudMoveItemModel, isArray: true })
+  @IsNotEmpty()
   @IsArray()
-  @IsString({ each: true })
-  @Transform(({ value }) => value.map((v: string) => S3KeyConverter(v)))
-  SourceKeys: Array<string>;
+  @Type(() => CloudMoveItemModel)
+  @ValidateNested({ each: true })
+  Items: Array<CloudMoveItemModel>;
 
   @ApiProperty()
   @IsString()
