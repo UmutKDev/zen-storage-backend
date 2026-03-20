@@ -15,6 +15,13 @@ export declare global {
       PG_SYNCHRONIZE: string;
       PG_CACERT?: string;
 
+      MONGO_HOSTNAME: string;
+      MONGO_PORT: string;
+      MONGO_USERNAME: string;
+      MONGO_PASSWORD: string;
+      MONGO_DATABASE: string;
+      MONGO_ENABLED: string;
+
       // Swagger Configuration
       SWAGGER_USER: string;
       SWAGGER_PASSWORD: string;

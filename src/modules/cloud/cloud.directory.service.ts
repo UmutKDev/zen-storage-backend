@@ -1,6 +1,5 @@
 import {
   CopyObjectCommand,
-  DeleteObjectCommand,
   GetObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
@@ -31,8 +30,11 @@ import {
   DirectoryRevealRequestModel,
   DirectoryRevealResponseModel,
   DirectoryConcealRequestModel,
+  ConflictDetailsResponseModel,
 } from './cloud.model';
 import { CloudS3Service } from './cloud.s3.service';
+import { CloudConflictService } from './cloud.conflict.service';
+import { CloudVersionService } from './cloud.version.service';
 import { RedisService } from '@modules/redis/redis.service';
 import { CloudKeys } from '@modules/redis/redis.keys';
 import {
@@ -45,6 +47,7 @@ import { KeyBuilder } from '@common/helpers/cast.helper';
 import { GetStorageOwnerId } from './cloud.context';
 import { EnsureTrailingSlash, NormalizeDirectoryPath } from './cloud.utils';
 import { CloudUsageService } from './cloud.usage.service';
+import { ConflictResolutionStrategy } from '@common/enums';
 
 type EncryptedFolderRecord = {
   ciphertext: string;
@@ -101,6 +104,8 @@ export class CloudDirectoryService {
 
   constructor(
     private readonly CloudS3Service: CloudS3Service,
+    private readonly CloudConflictService: CloudConflictService,
+    private readonly CloudVersionService: CloudVersionService,
     private readonly RedisService: RedisService,
     private readonly CloudUsageService: CloudUsageService,
   ) {}
@@ -126,7 +131,10 @@ export class CloudDirectoryService {
   async RenameDirectory(
     { Key, Name }: CloudRenameDirectoryRequestModel,
     User: UserContext,
-    options?: { allowEncryptedDirectories?: boolean },
+    options?: {
+      allowEncryptedDirectories?: boolean;
+      ConflictStrategy?: ConflictResolutionStrategy;
+    },
   ): Promise<boolean> {
     const sourcePath = NormalizeDirectoryPath(Key);
     if (!sourcePath) {
@@ -174,7 +182,7 @@ export class CloudDirectoryService {
     const targetPath = parentSegments.length
       ? `${parentSegments.join('/')}/${sanitizedName}`
       : sanitizedName;
-    const normalizedTargetPath = NormalizeDirectoryPath(targetPath);
+    let normalizedTargetPath = NormalizeDirectoryPath(targetPath);
 
     if (!normalizedTargetPath) {
       throw new HttpException(
@@ -191,7 +199,7 @@ export class CloudDirectoryService {
     const sourcePrefixFull = EnsureTrailingSlash(
       KeyBuilder([GetStorageOwnerId(User), sourcePath]),
     );
-    const targetPrefixFull = EnsureTrailingSlash(
+    let targetPrefixFull = EnsureTrailingSlash(
       KeyBuilder([GetStorageOwnerId(User), normalizedTargetPath]),
     );
 
@@ -208,10 +216,58 @@ export class CloudDirectoryService {
         (targetCheck.KeyCount ?? targetCheck.Contents?.length ?? 0) > 0;
 
       if (targetExists) {
-        throw new HttpException(
-          'Target directory already exists',
-          HttpStatus.CONFLICT,
-        );
+        const strategy =
+          options?.ConflictStrategy ?? ConflictResolutionStrategy.FAIL;
+
+        if (strategy === ConflictResolutionStrategy.FAIL) {
+          throw new HttpException(
+            plainToInstance(ConflictDetailsResponseModel, {
+              Conflicts: [
+                this.CloudConflictService.BuildConflictDetail(
+                  {
+                    Name: sourcePath.split('/').pop() || '',
+                    Key: sourcePath,
+                    IsDirectory: true,
+                  },
+                  {
+                    Name: sanitizedName,
+                    Key: normalizedTargetPath,
+                    IsDirectory: true,
+                  },
+                ),
+              ],
+              TotalItems: 1,
+              ConflictCount: 1,
+            }),
+            HttpStatus.CONFLICT,
+          );
+        }
+
+        if (strategy === ConflictResolutionStrategy.SKIP) {
+          return true;
+        }
+
+        if (strategy === ConflictResolutionStrategy.KEEP_BOTH) {
+          const newTargetFull =
+            await this.CloudConflictService.GenerateKeepBothKey(
+              targetPrefixFull,
+              true,
+            );
+          // Extract user-relative path from the resolved full key
+          const ownerPrefix = GetStorageOwnerId(User) + '/';
+          const newRelativePath = newTargetFull.startsWith(ownerPrefix)
+            ? newTargetFull.slice(ownerPrefix.length)
+            : newTargetFull;
+          normalizedTargetPath = NormalizeDirectoryPath(newRelativePath);
+          targetPrefixFull = EnsureTrailingSlash(
+            KeyBuilder([GetStorageOwnerId(User), normalizedTargetPath]),
+          );
+        }
+
+        if (strategy === ConflictResolutionStrategy.REPLACE) {
+          // Delete target directory contents before proceeding
+          await this.DeleteDirectoryContents(normalizedTargetPath, User);
+        }
       }
 
       let continuationToken: string | undefined = undefined;
@@ -255,11 +311,9 @@ export class CloudDirectoryService {
             }),
           );
 
-          await this.CloudS3Service.Send(
-            new DeleteObjectCommand({
-              Bucket: bucket,
-              Key: content.Key,
-            }),
+          await this.CloudVersionService.PermanentlyDeleteAllVersions(
+            bucket,
+            content.Key,
           );
 
           movedObjects++;
@@ -295,16 +349,74 @@ export class CloudDirectoryService {
   }
 
   async DirectoryCreate(
-    { Path, IsEncrypted }: DirectoryCreateRequestModel,
+    { Path, IsEncrypted, ConflictStrategy }: DirectoryCreateRequestModel,
     passphrase: string | undefined,
     User: UserContext,
   ): Promise<DirectoryResponseModel> {
-    const normalizedPath = NormalizeDirectoryPath(Path);
+    let normalizedPath = NormalizeDirectoryPath(Path);
     if (!normalizedPath) {
       throw new HttpException(
         'Directory path is required',
         HttpStatus.BAD_REQUEST,
       );
+    }
+
+    // Conflict detection for non-encrypted directories
+    if (!IsEncrypted) {
+      const fullPrefix = EnsureTrailingSlash(
+        KeyBuilder([GetStorageOwnerId(User), normalizedPath]),
+      );
+      const exists =
+        await this.CloudConflictService.CheckDirectoryExists(fullPrefix);
+      if (exists) {
+        const strategy = ConflictStrategy ?? ConflictResolutionStrategy.FAIL;
+
+        if (strategy === ConflictResolutionStrategy.FAIL) {
+          throw new HttpException(
+            plainToInstance(ConflictDetailsResponseModel, {
+              Conflicts: [
+                this.CloudConflictService.BuildConflictDetail(
+                  {
+                    Name: normalizedPath.split('/').pop() || '',
+                    Key: normalizedPath,
+                    IsDirectory: true,
+                  },
+                  {
+                    Name: normalizedPath.split('/').pop() || '',
+                    Key: normalizedPath,
+                    IsDirectory: true,
+                  },
+                ),
+              ],
+              TotalItems: 1,
+              ConflictCount: 1,
+            }),
+            HttpStatus.CONFLICT,
+          );
+        }
+
+        if (strategy === ConflictResolutionStrategy.SKIP) {
+          return plainToInstance(DirectoryResponseModel, {
+            Path: normalizedPath,
+            IsEncrypted: false,
+          });
+        }
+
+        if (strategy === ConflictResolutionStrategy.KEEP_BOTH) {
+          const resolvedFull =
+            await this.CloudConflictService.GenerateKeepBothKey(
+              fullPrefix,
+              true,
+            );
+          const ownerPrefix = GetStorageOwnerId(User) + '/';
+          const newRelativePath = resolvedFull.startsWith(ownerPrefix)
+            ? resolvedFull.slice(ownerPrefix.length)
+            : resolvedFull;
+          normalizedPath = NormalizeDirectoryPath(newRelativePath);
+        }
+
+        // REPLACE: continue (directory already exists, just proceed)
+      }
     }
 
     if (IsEncrypted) {
@@ -362,7 +474,7 @@ export class CloudDirectoryService {
   }
 
   async DirectoryRename(
-    { Path, Name }: DirectoryRenameRequestModel,
+    { Path, Name, ConflictStrategy }: DirectoryRenameRequestModel,
     passphrase: string | undefined,
     User: UserContext,
   ): Promise<DirectoryResponseModel> {
@@ -395,6 +507,7 @@ export class CloudDirectoryService {
 
     await this.RenameDirectory({ Key: normalizedPath, Name }, User, {
       allowEncryptedDirectories: isEncrypted,
+      ConflictStrategy,
     });
 
     const segments = normalizedPath.split('/').filter((s) => !!s);
@@ -460,16 +573,19 @@ export class CloudDirectoryService {
       return 0;
     }
 
+    const bucket = this.CloudS3Service.GetBuckets().Storage;
     const prefix = EnsureTrailingSlash(
       KeyBuilder([GetStorageOwnerId(User), normalized]),
     );
+
+    // First pass: calculate total bytes from current versions for usage tracking
     let continuationToken: string | undefined = undefined;
     let totalBytes = 0;
 
     do {
       const list = await this.CloudS3Service.Send(
         new ListObjectsV2Command({
-          Bucket: this.CloudS3Service.GetBuckets().Storage,
+          Bucket: bucket,
           Prefix: prefix,
           MaxKeys: this.MaxListObjects,
           ContinuationToken: continuationToken,
@@ -478,24 +594,21 @@ export class CloudDirectoryService {
 
       const contents = list.Contents || [];
       for (const content of contents) {
-        if (!content.Key) {
-          continue;
-        }
         if (content.Size) {
           totalBytes += content.Size;
         }
-        await this.CloudS3Service.Send(
-          new DeleteObjectCommand({
-            Bucket: this.CloudS3Service.GetBuckets().Storage,
-            Key: content.Key,
-          }),
-        );
       }
 
       continuationToken = list.IsTruncated
         ? list.NextContinuationToken
         : undefined;
     } while (continuationToken);
+
+    // Second pass: permanently delete all versions (including delete markers)
+    await this.CloudVersionService.PermanentlyDeleteAllVersionsByPrefix(
+      bucket,
+      prefix,
+    );
 
     if (totalBytes > 0) {
       await this.CloudUsageService.DecrementUsage(

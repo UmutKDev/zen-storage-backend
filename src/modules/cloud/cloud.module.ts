@@ -20,6 +20,8 @@ import { CloudUploadService } from './cloud.upload.service';
 import { CloudDirectoryService } from './cloud.directory.service';
 import { CloudUsageService } from './cloud.usage.service';
 import { CloudScanService } from './cloud.scan.service';
+import { CloudConflictService } from './cloud.conflict.service';
+import { CloudVersionService } from './cloud.version.service';
 
 @Module({
   imports: [
@@ -58,6 +60,8 @@ import { CloudScanService } from './cloud.scan.service';
     CloudDirectoryService,
     CloudUsageService,
     CloudScanService,
+    CloudConflictService,
+    CloudVersionService,
   ],
   exports: [
     CloudService,
@@ -70,6 +74,8 @@ import { CloudScanService } from './cloud.scan.service';
     CloudDirectoryService,
     CloudUsageService,
     CloudScanService,
+    CloudConflictService,
+    CloudVersionService,
   ],
 })
 export class CloudModule {}

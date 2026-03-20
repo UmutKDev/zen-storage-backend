@@ -37,6 +37,10 @@ import {
   CloudPreSignedUrlRequestModel,
   CloudSearchRequestModel,
   CloudSearchResponseModel,
+  ConflictDetailsResponseModel,
+  CloudVersionListResponseModel,
+  CloudRestoreVersionRequestModel,
+  CloudDeleteVersionRequestModel,
 } from './cloud.model';
 import {
   ApiSuccessArrayResponse,
@@ -259,6 +263,11 @@ export class CloudController {
     description: 'Move succeeded',
     schema: { type: 'boolean' },
   })
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict detected — target already exists',
+    type: ConflictDetailsResponseModel,
+  })
   @Put('Move')
   async Move(
     @Body() model: CloudMoveRequestModel,
@@ -296,6 +305,11 @@ export class CloudController {
   })
   @Put('Update')
   @ApiSuccessResponse(CloudObjectModel)
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict detected — target already exists',
+    type: ConflictDetailsResponseModel,
+  })
   async Update(
     @Body() model: CloudUpdateRequestModel,
     @User() user: UserContext,
@@ -369,5 +383,51 @@ export class CloudController {
         new HttpException(er, HttpStatus.INTERNAL_SERVER_ERROR);
       }
     }
+  }
+
+  // ============================================================================
+  // VERSIONING API
+  // ============================================================================
+
+  @ApiOperation({
+    summary: 'List previous versions of a file',
+    description:
+      'Returns the version history (non-current versions) for the given file key. Requires S3 bucket versioning to be enabled.',
+  })
+  @Get('Versions')
+  @ApiSuccessResponse(CloudVersionListResponseModel)
+  async ListVersions(
+    @Query() model: CloudKeyRequestModel,
+    @User() user: UserContext,
+  ): Promise<CloudVersionListResponseModel> {
+    return this.cloudService.ListVersions(model, user);
+  }
+
+  @CheckPolicies((Ability) => Ability.can(CaslAction.Update, CaslSubject.Cloud))
+  @ApiOperation({
+    summary: 'Restore a previous version of a file',
+    description:
+      'Copies the specified old version as the new current version. The previous current version becomes a non-current version.',
+  })
+  @Put('Versions/Restore')
+  async RestoreVersion(
+    @Body() model: CloudRestoreVersionRequestModel,
+    @User() user: UserContext,
+  ): Promise<void> {
+    return this.cloudService.RestoreVersion(model, user);
+  }
+
+  @CheckPolicies((Ability) => Ability.can(CaslAction.Delete, CaslSubject.Cloud))
+  @ApiOperation({
+    summary: 'Delete a specific version of a file',
+    description:
+      'Permanently deletes a non-current version. Cannot delete the current (latest) version.',
+  })
+  @Delete('Versions')
+  async DeleteVersion(
+    @Body() model: CloudDeleteVersionRequestModel,
+    @User() user: UserContext,
+  ): Promise<void> {
+    return this.cloudService.DeleteVersion(model, user);
   }
 }

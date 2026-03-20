@@ -87,10 +87,6 @@ export class NotificationGateway
 
       client.data.user = userContext;
       await client.join(`user:${session.UserId}`);
-
-      this.Logger.log(
-        `User connected: ${session.FullName} (${session.UserId}) — socket ${client.id}`,
-      );
     } catch (error) {
       this.Logger.error(
         `Connection error for socket ${client.id}: ${error.message}`,
@@ -99,13 +95,14 @@ export class NotificationGateway
     }
   }
 
-  handleDisconnect(client: Socket): void {
-    const user = client.data?.user as UserContext;
-    if (user) {
-      this.Logger.log(
-        `User disconnected: ${user.FullName} (${user.Id}) — socket ${client.id}`,
-      );
-    }
+  handleDisconnect() // client: Socket
+  : void {
+    // const user = client.data?.user as UserContext;
+    // if (user) {
+    //   this.Logger.log(
+    //     `User disconnected: ${user.FullName} (${user.Id}) — socket ${client.id}`,
+    //   );
+    // }
   }
 
   @SubscribeMessage('ping')

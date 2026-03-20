@@ -22,6 +22,7 @@ import {
   DirectoryRevealRequestModel,
   DirectoryRevealResponseModel,
   DirectoryConcealRequestModel,
+  ConflictDetailsResponseModel,
 } from './cloud.model';
 import { ApiSuccessResponse } from '@common/decorators/response.decorator';
 import { User } from '@common/decorators/user.decorator';
@@ -65,6 +66,11 @@ export class CloudDirectoriesController {
     description: 'Session token for encrypted folder access',
   })
   @ApiSuccessResponse(DirectoryResponseModel)
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict detected — directory already exists',
+    type: ConflictDetailsResponseModel,
+  })
   async DirectoryCreate(
     @Body() model: DirectoryCreateRequestModel,
     @User() user: UserContext,
@@ -99,6 +105,11 @@ export class CloudDirectoriesController {
     description: 'Session token for encrypted folder access',
   })
   @ApiSuccessResponse(DirectoryResponseModel)
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict detected — target directory already exists',
+    type: ConflictDetailsResponseModel,
+  })
   async DirectoryRename(
     @Body() model: DirectoryRenameRequestModel,
     @User() user: UserContext,

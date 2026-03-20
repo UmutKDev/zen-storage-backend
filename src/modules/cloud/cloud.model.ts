@@ -2,6 +2,7 @@ import {
   ArchiveEntryType,
   ArchiveFormat,
   CloudBreadcrumbLevelType,
+  ConflictResolutionStrategy,
   ScanStatus,
 } from '@common/enums';
 import { CDNPathResolver, S3KeyConverter } from '@common/helpers/cast.helper';
@@ -15,6 +16,7 @@ import {
   IsOptional,
   IsArray,
   IsNumber,
+  IsEnum,
   ValidateNested,
   MinLength,
   ValidateIf,
@@ -296,6 +298,11 @@ export class CloudCreateMultipartUploadRequestModel {
   @IsNotEmpty()
   @IsNumber()
   TotalSize: number;
+
+  @ApiProperty({ required: false, enum: ConflictResolutionStrategy })
+  @IsOptional()
+  @IsEnum(ConflictResolutionStrategy)
+  ConflictStrategy?: ConflictResolutionStrategy;
 }
 
 export class CloudCreateMultipartUploadResponseModel {
@@ -697,6 +704,100 @@ export class CloudAbortMultipartUploadRequestModel {
   UploadId: string;
 }
 
+// ============================================================================
+// CONFLICT RESOLUTION API
+// ============================================================================
+
+export class ConflictItemInfoModel {
+  @Expose()
+  @ApiProperty()
+  Name: string;
+
+  @Expose()
+  @ApiProperty()
+  Key: string;
+
+  @Expose()
+  @ApiProperty({ required: false })
+  Size?: number;
+
+  @Expose()
+  @ApiProperty({ required: false })
+  LastModified?: string;
+
+  @Expose()
+  @ApiProperty()
+  IsDirectory: boolean;
+}
+
+export class ConflictDetailModel {
+  @Expose()
+  @ApiProperty({ type: ConflictItemInfoModel })
+  @Type(() => ConflictItemInfoModel)
+  Source: ConflictItemInfoModel;
+
+  @Expose()
+  @ApiProperty({ type: ConflictItemInfoModel })
+  @Type(() => ConflictItemInfoModel)
+  Target: ConflictItemInfoModel;
+}
+
+export class ConflictResolutionItemModel {
+  @ApiProperty({ description: 'Source key this resolution applies to' })
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => S3KeyConverter(value))
+  Key: string;
+
+  @ApiProperty({ enum: ConflictResolutionStrategy })
+  @IsEnum(ConflictResolutionStrategy)
+  Strategy: ConflictResolutionStrategy;
+}
+
+export class ConflictResolutionModel {
+  @ApiProperty({
+    required: false,
+    enum: ConflictResolutionStrategy,
+    description:
+      'Global strategy applied to all conflicts. Default: FAIL (return 409)',
+  })
+  @IsOptional()
+  @IsEnum(ConflictResolutionStrategy)
+  Strategy?: ConflictResolutionStrategy;
+
+  @ApiProperty({
+    required: false,
+    type: ConflictResolutionItemModel,
+    isArray: true,
+    description:
+      'Per-item strategy overrides. Key matches the source item key.',
+  })
+  @IsOptional()
+  @IsArray()
+  @Type(() => ConflictResolutionItemModel)
+  @ValidateNested({ each: true })
+  Items?: ConflictResolutionItemModel[];
+}
+
+export class ConflictDetailsResponseModel {
+  @Expose()
+  @ApiProperty({ type: ConflictDetailModel, isArray: true })
+  @Type(() => ConflictDetailModel)
+  Conflicts: ConflictDetailModel[];
+
+  @Expose()
+  @ApiProperty({ description: 'Total number of items in the original request' })
+  TotalItems: number;
+
+  @Expose()
+  @ApiProperty({ description: 'Number of items that have conflicts' })
+  ConflictCount: number;
+}
+
+// ============================================================================
+// MOVE / UPDATE API
+// ============================================================================
+
 export class CloudMoveItemModel {
   @ApiProperty()
   @IsNotEmpty()
@@ -722,6 +823,12 @@ export class CloudMoveRequestModel {
   @IsNotEmpty()
   @Transform(({ value }) => S3KeyConverter(value))
   DestinationKey: string;
+
+  @ApiProperty({ required: false, type: () => ConflictResolutionModel })
+  @IsOptional()
+  @Type(() => ConflictResolutionModel)
+  @ValidateNested()
+  ConflictResolution?: ConflictResolutionModel;
 }
 
 export class CloudUpdateRequestModel {
@@ -743,6 +850,11 @@ export class CloudUpdateRequestModel {
   @ApiProperty({ required: false })
   @IsOptional()
   Metadata?: Record<string, string>;
+
+  @ApiProperty({ required: false, enum: ConflictResolutionStrategy })
+  @IsOptional()
+  @IsEnum(ConflictResolutionStrategy)
+  ConflictStrategy?: ConflictResolutionStrategy;
 }
 
 export class CloudEncryptedFolderSummaryModel {
@@ -851,6 +963,11 @@ export class DirectoryCreateRequestModel {
   @IsBoolean()
   @IsOptional()
   IsEncrypted?: boolean = false;
+
+  @ApiProperty({ required: false, enum: ConflictResolutionStrategy })
+  @IsOptional()
+  @IsEnum(ConflictResolutionStrategy)
+  ConflictStrategy?: ConflictResolutionStrategy;
 }
 
 /**
@@ -871,6 +988,11 @@ export class DirectoryRenameRequestModel {
     message: 'Directory name cannot contain slashes',
   })
   Name: string;
+
+  @ApiProperty({ required: false, enum: ConflictResolutionStrategy })
+  @IsOptional()
+  @IsEnum(ConflictResolutionStrategy)
+  ConflictStrategy?: ConflictResolutionStrategy;
 }
 
 /**
@@ -1067,6 +1189,73 @@ export class DirectoryConcealRequestModel {
   @IsNotEmpty()
   @Transform(({ value }) => S3KeyConverter(value))
   Path: string;
+}
+
+// ============================================================================
+// VERSIONING API
+// ============================================================================
+
+export class CloudVersionModel {
+  @Expose()
+  @ApiProperty()
+  VersionId: string;
+
+  @Expose()
+  @ApiProperty()
+  Key: string;
+
+  @Expose()
+  @ApiProperty()
+  Size: number;
+
+  @Expose()
+  @ApiProperty()
+  LastModified: string;
+
+  @Expose()
+  @ApiProperty()
+  IsLatest: boolean;
+
+  @Expose()
+  @ApiProperty()
+  ETag: string;
+}
+
+export class CloudVersionListResponseModel {
+  @Expose()
+  @ApiProperty({ type: CloudVersionModel, isArray: true })
+  @Type(() => CloudVersionModel)
+  Versions: CloudVersionModel[];
+
+  @Expose()
+  @ApiProperty()
+  Key: string;
+}
+
+export class CloudRestoreVersionRequestModel {
+  @ApiProperty({ description: 'File key (relative, without owner prefix)' })
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => S3KeyConverter(value))
+  Key: string;
+
+  @ApiProperty({ description: 'Version ID to restore' })
+  @IsString()
+  @IsNotEmpty()
+  VersionId: string;
+}
+
+export class CloudDeleteVersionRequestModel {
+  @ApiProperty({ description: 'File key (relative, without owner prefix)' })
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => S3KeyConverter(value))
+  Key: string;
+
+  @ApiProperty({ description: 'Version ID to delete' })
+  @IsString()
+  @IsNotEmpty()
+  VersionId: string;
 }
 
 // ============================================================================

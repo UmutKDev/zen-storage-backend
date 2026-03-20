@@ -75,6 +75,13 @@ enum ScanStatus {
   SKIPPED = 'skipped',
 }
 
+enum ConflictResolutionStrategy {
+  FAIL = 'FAIL',
+  REPLACE = 'REPLACE',
+  SKIP = 'SKIP',
+  KEEP_BOTH = 'KEEP_BOTH',
+}
+
 export {
   Role,
   Status,
@@ -89,4 +96,5 @@ export {
   ArchiveFormat,
   ArchiveEntryType,
   ScanStatus,
+  ConflictResolutionStrategy,
 };

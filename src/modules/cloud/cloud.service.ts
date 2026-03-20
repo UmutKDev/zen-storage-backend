@@ -40,6 +40,9 @@ import {
   CloudPreSignedUrlRequestModel,
   CloudSearchRequestModel,
   CloudSearchResponseModel,
+  CloudVersionListResponseModel,
+  CloudRestoreVersionRequestModel,
+  CloudDeleteVersionRequestModel,
   // New Directories API models
   DirectoryCreateRequestModel,
   DirectoryRenameRequestModel,
@@ -64,9 +67,11 @@ import { CloudUploadService } from './cloud.upload.service';
 import { CloudDirectoryService } from './cloud.directory.service';
 import { CloudUsageService } from './cloud.usage.service';
 import { CloudScanService } from './cloud.scan.service';
+import { CloudVersionService } from './cloud.version.service';
+import { CloudS3Service } from './cloud.s3.service';
 import { NormalizeDirectoryPath } from './cloud.utils';
 import { GetStorageOwnerId } from './cloud.context';
-import { SizeFormatter } from '@common/helpers/cast.helper';
+import { KeyBuilder, SizeFormatter } from '@common/helpers/cast.helper';
 import { RedisService } from '@modules/redis/redis.service';
 import { CloudKeys } from '@modules/redis/redis.keys';
 import { CLOUD_IDEMPOTENCY_TTL } from '@modules/redis/redis.ttl';
@@ -86,6 +91,8 @@ export class CloudService {
     private readonly CloudDirectoryService: CloudDirectoryService,
     private readonly CloudUsageService: CloudUsageService,
     private readonly CloudScanService: CloudScanService,
+    private readonly CloudVersionService: CloudVersionService,
+    private readonly CloudS3Service: CloudS3Service,
     private readonly RedisService: RedisService,
     private readonly NotificationService: NotificationService,
   ) {}
@@ -396,7 +403,7 @@ export class CloudService {
   //#region Move
 
   async Move(
-    { Items, DestinationKey }: CloudMoveRequestModel,
+    { Items, DestinationKey, ConflictResolution }: CloudMoveRequestModel,
     User: UserContext,
     idempotencyKey?: string,
   ): Promise<boolean> {
@@ -409,7 +416,7 @@ export class CloudService {
       return cached;
     }
     const result = await this.CloudObjectService.Move(
-      { Items, DestinationKey },
+      { Items, DestinationKey, ConflictResolution },
       User,
     );
     for (const item of Items) {
@@ -653,13 +660,14 @@ export class CloudService {
       ContentType,
       Metadata,
       TotalSize,
+      ConflictStrategy,
     }: CloudCreateMultipartUploadRequestModel,
     User: UserContext,
     sessionToken?: string,
   ): Promise<CloudCreateMultipartUploadResponseModel> {
     await this.EnsureUploadAccess(Key, GetStorageOwnerId(User), sessionToken);
     return this.CloudUploadService.UploadCreateMultipartUpload(
-      { Key, ContentType, Metadata, TotalSize },
+      { Key, ContentType, Metadata, TotalSize, ConflictStrategy },
       User,
     );
   }
@@ -764,9 +772,18 @@ export class CloudService {
     );
     await this.CloudListService.InvalidateListCache(GetStorageOwnerId(User));
 
+    // Enforce version limit after upload (prune old versions)
+    const bucket = this.CloudS3Service.GetBuckets().Storage;
+    const fullKey = KeyBuilder([GetStorageOwnerId(User), Key]);
+    await this.CloudVersionService.CleanupOldVersions(bucket, fullKey).catch(
+      (err) =>
+        this.Logger.warn(
+          `Version cleanup failed for "${Key}": ${err?.message}`,
+        ),
+    );
+
     // Notify user about upload completion
     const fileName = Key.split('/').pop() || Key;
-    console.log('first');
     this.NotificationService.EmitToUser(
       User.Id,
       NotificationType.UPLOAD_COMPLETE,
@@ -861,11 +878,11 @@ export class CloudService {
   //#region Update (rename/metadata)
 
   async Update(
-    { Key, Name, Metadata }: CloudUpdateRequestModel,
+    { Key, Name, Metadata, ConflictStrategy }: CloudUpdateRequestModel,
     User: UserContext,
   ): Promise<CloudObjectModel> {
     const result = await this.CloudObjectService.Update(
-      { Key, Name, Metadata },
+      { Key, Name, Metadata, ConflictStrategy },
       User,
     );
     await this.CloudListService.InvalidateThumbnailCacheForObjectKey(
@@ -874,6 +891,50 @@ export class CloudService {
     );
     await this.CloudListService.InvalidateListCache(GetStorageOwnerId(User));
     return result;
+  }
+
+  //#endregion
+
+  // ============================================================================
+  // VERSIONING API
+  // ============================================================================
+
+  //#region Versioning
+
+  async ListVersions(
+    { Key }: CloudKeyRequestModel,
+    User: UserContext,
+  ): Promise<CloudVersionListResponseModel> {
+    const bucket = this.CloudS3Service.GetBuckets().Storage;
+    const fullKey = KeyBuilder([GetStorageOwnerId(User), Key]);
+    const versions = await this.CloudVersionService.ListVersions(
+      bucket,
+      fullKey,
+    );
+    return { Versions: versions, Key };
+  }
+
+  async RestoreVersion(
+    { Key, VersionId }: CloudRestoreVersionRequestModel,
+    User: UserContext,
+  ): Promise<void> {
+    const bucket = this.CloudS3Service.GetBuckets().Storage;
+    const fullKey = KeyBuilder([GetStorageOwnerId(User), Key]);
+    await this.CloudVersionService.RestoreVersion(bucket, fullKey, VersionId);
+    await this.CloudListService.InvalidateThumbnailCacheForObjectKey(
+      GetStorageOwnerId(User),
+      Key,
+    );
+    await this.CloudListService.InvalidateListCache(GetStorageOwnerId(User));
+  }
+
+  async DeleteVersion(
+    { Key, VersionId }: CloudDeleteVersionRequestModel,
+    User: UserContext,
+  ): Promise<void> {
+    const bucket = this.CloudS3Service.GetBuckets().Storage;
+    const fullKey = KeyBuilder([GetStorageOwnerId(User), Key]);
+    await this.CloudVersionService.DeleteVersion(bucket, fullKey, VersionId);
   }
 
   //#endregion
@@ -889,7 +950,7 @@ export class CloudService {
    * For encrypted directories, passphrase is required via X-Folder-Passphrase header.
    */
   async DirectoryCreate(
-    { Path, IsEncrypted }: DirectoryCreateRequestModel,
+    { Path, IsEncrypted, ConflictStrategy }: DirectoryCreateRequestModel,
     passphrase: string | undefined,
     User: UserContext,
     sessionToken?: string,
@@ -900,7 +961,7 @@ export class CloudService {
       sessionToken,
     );
     const result = await this.CloudDirectoryService.DirectoryCreate(
-      { Path, IsEncrypted },
+      { Path, IsEncrypted, ConflictStrategy },
       passphrase,
       User,
     );
@@ -916,7 +977,7 @@ export class CloudService {
    * Rename a directory. For encrypted directories, validates passphrase.
    */
   async DirectoryRename(
-    { Path, Name }: DirectoryRenameRequestModel,
+    { Path, Name, ConflictStrategy }: DirectoryRenameRequestModel,
     passphrase: string | undefined,
     User: UserContext,
     sessionToken?: string,
@@ -927,7 +988,7 @@ export class CloudService {
       sessionToken,
     );
     const result = await this.CloudDirectoryService.DirectoryRename(
-      { Path, Name },
+      { Path, Name, ConflictStrategy },
       passphrase,
       User,
     );

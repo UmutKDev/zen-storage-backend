@@ -5,7 +5,7 @@ import { Injectable } from '@nestjs/common';
 @Injectable()
 export class CloudS3Service {
   private readonly Buckets = {
-    Storage: 'storage',
+    Storage: 'storage-1',
     Photos: 'Photos',
   };
 

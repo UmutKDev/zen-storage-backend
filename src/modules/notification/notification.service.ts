@@ -51,9 +51,9 @@ export class NotificationService {
     };
 
     this.Server.to(`user:${UserId}`).emit('notification', payload);
-    this.Logger.debug(
-      `Notification [${Type}] emitted to user:${UserId} — "${Title}"`,
-    );
+    // this.Logger.debug(
+    //   `Notification [${Type}] emitted to user:${UserId} — "${Title}"`,
+    // );
 
     // Persist to MongoDB (fire-and-forget, never block the emitter)
     this.NotificationHistoryModel.create({
@@ -109,7 +109,7 @@ export class NotificationService {
     };
 
     this.Server.emit('notification', payload);
-    this.Logger.debug(`Broadcast notification [${Type}] — "${Title}"`);
+    // this.Logger.debug(`Broadcast notification [${Type}] — "${Title}"`);
   }
 
   /**

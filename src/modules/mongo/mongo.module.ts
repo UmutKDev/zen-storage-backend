@@ -21,21 +21,23 @@ const featureModules = MONGO_ENABLED
     ]
   : [];
 
+const URI = MONGO_ENABLED
+  ? `mongodb://${process.env.MONGO_USERNAME}:${encodeURIComponent(
+      process.env.MONGO_PASSWORD,
+    )}@${process.env.MONGO_HOSTNAME}:${process.env.MONGO_PORT}`
+  : null;
 @Global()
 @Module({
   imports: [
     ...(MONGO_ENABLED
       ? [
-          MongooseModule.forRoot(
-            process.env.MONGO_URI || 'mongodb://localhost:27017',
-            {
-              dbName: process.env.MONGO_DATABASE || 'storage_logs',
-              maxPoolSize: 10,
-              minPoolSize: 2,
-              connectTimeoutMS: 10000,
-              socketTimeoutMS: 45000,
-            },
-          ),
+          MongooseModule.forRoot(URI, {
+            dbName: process.env.MONGO_DATABASE,
+            maxPoolSize: 10,
+            minPoolSize: 2,
+            connectTimeoutMS: 10000,
+            socketTimeoutMS: 45000,
+          }),
         ]
       : []),
     ...featureModules,

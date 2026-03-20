@@ -18,6 +18,7 @@ import {
   ApiTags,
   ApiHeader,
   ApiOperation,
+  ApiResponse,
 } from '@nestjs/swagger';
 import { CloudService } from './cloud.service';
 import {
@@ -32,6 +33,7 @@ import {
   CloudGetMultipartPartUrlsBatchResponseModel,
   CloudUploadPartRequestModel,
   CloudUploadPartResponseModel,
+  ConflictDetailsResponseModel,
 } from './cloud.model';
 import { ApiSuccessResponse } from '@common/decorators/response.decorator';
 import { User } from '@common/decorators/user.decorator';
@@ -74,6 +76,11 @@ export class CloudUploadController {
     description: 'Session token for encrypted folder access',
   })
   @ApiSuccessResponse(CloudCreateMultipartUploadResponseModel)
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict detected — file already exists at target key',
+    type: ConflictDetailsResponseModel,
+  })
   async UploadCreateMultipartUpload(
     @Body() model: CloudCreateMultipartUploadRequestModel,
     @User() user: UserContext,
