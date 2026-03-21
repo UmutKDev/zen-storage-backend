@@ -204,6 +204,22 @@ export namespace CloudKeys {
     userId: string,
     normalizedPath: string,
   ) => `${HiddenFolderSession(userId, normalizedPath)}*`;
+
+  /** cloud:duplicate-scan:status:{scanId} — scan status + progress JSON */
+  export const DuplicateScanStatus = (scanId: string) =>
+    `cloud:duplicate-scan:status:${scanId}`;
+
+  /** cloud:duplicate-scan:result:{scanId} — scan result (duplicate groups) JSON */
+  export const DuplicateScanResult = (scanId: string) =>
+    `cloud:duplicate-scan:result:${scanId}`;
+
+  /** cloud:duplicate-scan:cancel:{scanId} — signal to cancel a running scan */
+  export const DuplicateScanCancel = (scanId: string) =>
+    `cloud:duplicate-scan:cancel:${scanId}`;
+
+  /** cloud:duplicate-scan:active:{userId} — tracks active scan ID for a user */
+  export const DuplicateScanActive = (userId: string) =>
+    `cloud:duplicate-scan:active:${userId}`;
 }
 
 // ─── Team Keys ──────────────────────────────────────────────────────────────

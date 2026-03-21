@@ -101,6 +101,26 @@ export const ARCHIVE_CREATE_RESULT_TTL = envInt(
   3600,
 );
 
+// ─── Duplicate Scan ────────────────────────────────────────────────────────
+
+/** Duplicate scan status cache TTL — 24 hours */
+export const DUPLICATE_SCAN_STATUS_TTL = envInt(
+  'DUPLICATE_SCAN_STATUS_TTL_SECONDS',
+  86400,
+);
+
+/** Duplicate scan result cache TTL — 24 hours */
+export const DUPLICATE_SCAN_RESULT_TTL = envInt(
+  'DUPLICATE_SCAN_RESULT_TTL_SECONDS',
+  86400,
+);
+
+/** Duplicate scan cancel signal TTL — 6 hours */
+export const DUPLICATE_SCAN_CANCEL_TTL = 6 * 60 * 60;
+
+/** Duplicate scan active lock TTL — 6 hours (auto-cleared on completion) */
+export const DUPLICATE_SCAN_ACTIVE_TTL = 6 * 60 * 60;
+
 // ─── Team ───────────────────────────────────────────────────────────────────
 
 /** Team membership cache — 5 minutes (used by TeamContextGuard) */

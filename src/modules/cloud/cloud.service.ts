@@ -59,6 +59,14 @@ import {
   DirectoryRevealResponseModel,
   DirectoryConcealRequestModel,
 } from './cloud.model';
+import {
+  CloudDuplicateScanStartRequestModel,
+  CloudDuplicateScanStartResponseModel,
+  CloudDuplicateScanIdRequestModel,
+  CloudDuplicateScanStatusResponseModel,
+  CloudDuplicateScanResultResponseModel,
+  CloudDuplicateScanCancelResponseModel,
+} from './cloud.model';
 import { asyncLocalStorage } from '@common/context/context.service';
 import { CloudListService } from './cloud.list.service';
 import { CloudObjectService } from './cloud.object.service';
@@ -68,6 +76,7 @@ import { CloudDirectoryService } from './cloud.directory.service';
 import { CloudUsageService } from './cloud.usage.service';
 import { CloudScanService } from './cloud.scan.service';
 import { CloudVersionService } from './cloud.version.service';
+import { CloudDuplicateService } from './cloud.duplicate.service';
 import { CloudS3Service } from './cloud.s3.service';
 import { NormalizeDirectoryPath } from './cloud.utils';
 import { GetStorageOwnerId } from './cloud.context';
@@ -92,6 +101,7 @@ export class CloudService {
     private readonly CloudUsageService: CloudUsageService,
     private readonly CloudScanService: CloudScanService,
     private readonly CloudVersionService: CloudVersionService,
+    private readonly CloudDuplicateService: CloudDuplicateService,
     private readonly CloudS3Service: CloudS3Service,
     private readonly RedisService: RedisService,
     private readonly NotificationService: NotificationService,
@@ -1190,6 +1200,35 @@ export class CloudService {
     );
     await this.CloudListService.InvalidateListCache(GetStorageOwnerId(User));
     return result;
+  }
+
+  //#endregion
+
+  //#region Duplicate Scan
+
+  async DuplicateScanStart(
+    model: CloudDuplicateScanStartRequestModel,
+    User: UserContext,
+  ): Promise<CloudDuplicateScanStartResponseModel> {
+    return this.CloudDuplicateService.EnqueueDuplicateScan(model, User);
+  }
+
+  async DuplicateScanStatus(
+    { ScanId }: CloudDuplicateScanIdRequestModel,
+  ): Promise<CloudDuplicateScanStatusResponseModel | null> {
+    return this.CloudDuplicateService.GetDuplicateScanStatus(ScanId);
+  }
+
+  async DuplicateScanResult(
+    { ScanId }: CloudDuplicateScanIdRequestModel,
+  ): Promise<CloudDuplicateScanResultResponseModel | null> {
+    return this.CloudDuplicateService.GetDuplicateScanResult(ScanId);
+  }
+
+  async DuplicateScanCancel(
+    { ScanId }: CloudDuplicateScanIdRequestModel,
+  ): Promise<CloudDuplicateScanCancelResponseModel> {
+    return this.CloudDuplicateService.CancelDuplicateScan(ScanId);
   }
 
   //#endregion

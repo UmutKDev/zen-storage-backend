@@ -82,6 +82,22 @@ enum ConflictResolutionStrategy {
   KEEP_BOTH = 'KEEP_BOTH',
 }
 
+enum DuplicateScanStatus {
+  PENDING = 'PENDING',
+  SCANNING = 'SCANNING',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+  FAILED = 'FAILED',
+}
+
+enum DuplicateScanPhase {
+  LISTING = 'LISTING',
+  SIZE_GROUPING = 'SIZE_GROUPING',
+  CONTENT_HASHING = 'CONTENT_HASHING',
+  PERCEPTUAL_HASHING = 'PERCEPTUAL_HASHING',
+  FINALIZING = 'FINALIZING',
+}
+
 export {
   Role,
   Status,
@@ -97,4 +113,6 @@ export {
   ArchiveEntryType,
   ScanStatus,
   ConflictResolutionStrategy,
+  DuplicateScanStatus,
+  DuplicateScanPhase,
 };

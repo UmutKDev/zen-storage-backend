@@ -5,6 +5,7 @@ import {
   Get,
   HttpException,
   HttpStatus,
+  Post,
   Put,
   Query,
   Res,
@@ -41,6 +42,12 @@ import {
   CloudVersionListResponseModel,
   CloudRestoreVersionRequestModel,
   CloudDeleteVersionRequestModel,
+  CloudDuplicateScanStartRequestModel,
+  CloudDuplicateScanStartResponseModel,
+  CloudDuplicateScanIdRequestModel,
+  CloudDuplicateScanStatusResponseModel,
+  CloudDuplicateScanResultResponseModel,
+  CloudDuplicateScanCancelResponseModel,
 } from './cloud.model';
 import {
   ApiSuccessArrayResponse,
@@ -429,5 +436,61 @@ export class CloudController {
     @User() user: UserContext,
   ): Promise<void> {
     return this.cloudService.DeleteVersion(model, user);
+  }
+
+  // ============================================================================
+  // DUPLICATE SCAN API
+  // ============================================================================
+
+  @ApiOperation({
+    summary: 'Start duplicate file scan for a folder',
+    description:
+      'Starts an async job to scan a folder for duplicate files. Uses SHA-256 for exact matches and perceptual hashing (dHash) for image similarity detection.',
+  })
+  @Post('Scan/Duplicate/Start')
+  @ApiSuccessResponse(CloudDuplicateScanStartResponseModel)
+  async DuplicateScanStart(
+    @Body() model: CloudDuplicateScanStartRequestModel,
+    @User() user: UserContext,
+  ): Promise<CloudDuplicateScanStartResponseModel> {
+    return this.cloudService.DuplicateScanStart(model, user);
+  }
+
+  @ApiOperation({
+    summary: 'Get duplicate scan status and progress',
+    description:
+      'Returns the current status and progress of a duplicate scan job.',
+  })
+  @Get('Scan/Duplicate/Status')
+  @ApiSuccessResponse(CloudDuplicateScanStatusResponseModel)
+  async DuplicateScanStatus(
+    @Query() model: CloudDuplicateScanIdRequestModel,
+  ): Promise<CloudDuplicateScanStatusResponseModel | null> {
+    return this.cloudService.DuplicateScanStatus(model);
+  }
+
+  @ApiOperation({
+    summary: 'Get duplicate scan results',
+    description:
+      'Returns the duplicate groups found by a completed scan. Each group contains files that are duplicates of each other with similarity scores.',
+  })
+  @Get('Scan/Duplicate/Result')
+  @ApiSuccessResponse(CloudDuplicateScanResultResponseModel)
+  async DuplicateScanResult(
+    @Query() model: CloudDuplicateScanIdRequestModel,
+  ): Promise<CloudDuplicateScanResultResponseModel | null> {
+    return this.cloudService.DuplicateScanResult(model);
+  }
+
+  @ApiOperation({
+    summary: 'Cancel a running duplicate scan',
+    description: 'Cancels a duplicate scan job if it is pending or running.',
+  })
+  @Post('Scan/Duplicate/Cancel')
+  @ApiSuccessResponse(CloudDuplicateScanCancelResponseModel)
+  async DuplicateScanCancel(
+    @Body() model: CloudDuplicateScanIdRequestModel,
+  ): Promise<CloudDuplicateScanCancelResponseModel> {
+    return this.cloudService.DuplicateScanCancel(model);
   }
 }

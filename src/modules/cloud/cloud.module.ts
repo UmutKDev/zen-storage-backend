@@ -22,6 +22,7 @@ import { CloudUsageService } from './cloud.usage.service';
 import { CloudScanService } from './cloud.scan.service';
 import { CloudConflictService } from './cloud.conflict.service';
 import { CloudVersionService } from './cloud.version.service';
+import { CloudDuplicateService } from './cloud.duplicate.service';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { CloudVersionService } from './cloud.version.service';
     CloudScanService,
     CloudConflictService,
     CloudVersionService,
+    CloudDuplicateService,
   ],
   exports: [
     CloudService,
@@ -76,6 +78,7 @@ import { CloudVersionService } from './cloud.version.service';
     CloudScanService,
     CloudConflictService,
     CloudVersionService,
+    CloudDuplicateService,
   ],
 })
 export class CloudModule {}

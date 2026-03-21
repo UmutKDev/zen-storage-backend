@@ -96,4 +96,3 @@ export const NormalizeArchiveEntryPath = (entryPath: string): string | null => {
     return null;
   return segments.join('/');
 };
-

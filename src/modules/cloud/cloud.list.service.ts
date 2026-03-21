@@ -1,13 +1,11 @@
 import {
   CommonPrefix,
-  GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
   ListObjectsV2CommandInput,
   _Object,
 } from '@aws-sdk/client-s3';
 import { Injectable, Logger } from '@nestjs/common';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { plainToInstance } from 'class-transformer';
 import {
   CloudBreadCrumbModel,
@@ -45,7 +43,6 @@ export class CloudListService {
     1,
     parseInt(process.env.CLOUD_LIST_METADATA_CONCURRENCY ?? '5', 10),
   );
-  private readonly PresignedUrlExpirySeconds = 3600;
   private readonly DirectoryThumbnailLimit = 4;
   private readonly DirectoryThumbnailMaxFolders = 4;
   private readonly EmptyFolderPlaceholder = '.emptyFolderPlaceholder';
@@ -884,11 +881,11 @@ export class CloudListService {
       contentType = head.ContentType;
     }
 
-    const SignedUrl = await this.SignedUrlBuilder(
+    const SignedUrl = await this.CloudS3Service.SignedUrlBuilder(
       content,
       IsSignedUrlProcessing,
       this.CloudS3Service,
-      this.PresignedUrlExpirySeconds,
+      this.CloudS3Service.PresignedUrlExpirySeconds,
     );
 
     const Name = content.Key?.split('/').pop();
@@ -1051,7 +1048,7 @@ export class CloudListService {
     const ttlSeconds = IsSignedUrlProcessing
       ? Math.min(
           CLOUD_THUMBNAIL_CACHE_TTL,
-          Math.max(1, this.PresignedUrlExpirySeconds - 60),
+          Math.max(1, this.CloudS3Service.PresignedUrlExpirySeconds - 60),
         )
       : CLOUD_THUMBNAIL_CACHE_TTL;
     await this.RedisService.Set(cacheKey, thumbnails, ttlSeconds);
@@ -1136,45 +1133,6 @@ export class CloudListService {
       return 'root';
     }
     return parts[0];
-  }
-
-  private ReplaceSignedUrlHost(url: string): string {
-    const publicEndpoint = process.env.S3_PUBLIC_ENDPOINT;
-    if (!publicEndpoint) {
-      return url;
-    }
-
-    try {
-      const signedUrl = new URL(url);
-      const endpointUrl = new URL(publicEndpoint);
-      signedUrl.protocol = endpointUrl.protocol;
-      signedUrl.host = endpointUrl.host;
-      return signedUrl.toString();
-    } catch {
-      return url;
-    }
-  }
-
-  async SignedUrlBuilder(
-    content: _Object,
-    IsSignedUrlProcessing: boolean,
-    CloudS3Service: CloudS3Service,
-    PresignedUrlExpirySeconds: number,
-  ): Promise<string> {
-    const ObjectCommand = new GetObjectCommand({
-      Bucket: CloudS3Service.GetBuckets().Storage,
-      Key: content.Key,
-    });
-
-    if (IsSignedUrlProcessing) {
-      return this.ReplaceSignedUrlHost(
-        await getSignedUrl(CloudS3Service.GetClient(), ObjectCommand, {
-          expiresIn: PresignedUrlExpirySeconds,
-        }),
-      );
-    }
-
-    return CloudS3Service.GetUrl(content.Key!);
   }
 
   private IsInsideEncryptedFolder(

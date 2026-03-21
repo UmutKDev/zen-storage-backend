@@ -3,6 +3,8 @@ import {
   ArchiveFormat,
   CloudBreadcrumbLevelType,
   ConflictResolutionStrategy,
+  DuplicateScanPhase,
+  DuplicateScanStatus,
   ScanStatus,
 } from '@common/enums';
 import { CDNPathResolver, S3KeyConverter } from '@common/helpers/cast.helper';
@@ -1317,4 +1319,194 @@ export class CloudSearchResponseModel {
   @Expose()
   @ApiProperty()
   TotalDirectoryCount: number;
+}
+
+// ============================================================================
+// DUPLICATE SCAN API
+// ============================================================================
+
+export class CloudDuplicateScanStartRequestModel {
+  @ApiProperty({ description: 'Folder path to scan for duplicates' })
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => S3KeyConverter(value))
+  Path: string;
+
+  @ApiProperty({
+    required: false,
+    default: true,
+    description: 'Whether to scan subdirectories recursively',
+  })
+  @IsBoolean()
+  @IsOptional()
+  Recursive?: boolean = true;
+
+  @ApiProperty({
+    required: false,
+    default: 95,
+    description:
+      'Similarity threshold percentage for image perceptual hashing (1-100)',
+  })
+  @IsNumber()
+  @IsOptional()
+  @Min(1)
+  @Max(100)
+  SimilarityThreshold?: number = 95;
+}
+
+export class CloudDuplicateScanStartResponseModel {
+  @Expose()
+  @ApiProperty()
+  ScanId: string;
+
+  @Expose()
+  @ApiProperty({ enum: DuplicateScanStatus })
+  Status: string;
+}
+
+export class CloudDuplicateScanIdRequestModel {
+  @ApiProperty({ description: 'ID of the duplicate scan job' })
+  @IsString()
+  @IsNotEmpty()
+  ScanId: string;
+}
+
+export class CloudDuplicateScanProgressModel {
+  @Expose()
+  @ApiProperty()
+  TotalFiles: number;
+
+  @Expose()
+  @ApiProperty()
+  ProcessedFiles: number;
+
+  @Expose()
+  @ApiProperty({ enum: DuplicateScanPhase })
+  Phase: string;
+
+  @Expose()
+  @ApiProperty({ required: false })
+  Percentage?: number;
+}
+
+export class CloudDuplicateScanStatusResponseModel {
+  @Expose()
+  @ApiProperty()
+  ScanId: string;
+
+  @Expose()
+  @ApiProperty({ enum: DuplicateScanStatus })
+  Status: string;
+
+  @Expose()
+  @ApiProperty({ required: false, type: CloudDuplicateScanProgressModel })
+  @Type(() => CloudDuplicateScanProgressModel)
+  Progress?: CloudDuplicateScanProgressModel;
+
+  @Expose()
+  @ApiProperty({ required: false })
+  StartedAt?: string;
+
+  @Expose()
+  @ApiProperty({ required: false })
+  CompletedAt?: string;
+
+  @Expose()
+  @ApiProperty({ required: false })
+  Error?: string;
+}
+
+export class CloudDuplicateFileModel {
+  @Expose()
+  @ApiProperty({ description: 'Object key (relative, without owner prefix)' })
+  @Transform(({ value }) => S3KeyConverter(value))
+  Key: string;
+
+  @Expose()
+  @ApiProperty()
+  Name: string;
+
+  @Expose()
+  @ApiProperty()
+  Size: number;
+
+  @Expose()
+  @ApiProperty({ required: false })
+  LastModified?: string;
+
+  @Expose()
+  @ApiProperty({ required: false })
+  MimeType?: string;
+
+  @Expose()
+  @ApiProperty({ required: false, type: CloudPathModel })
+  @Type(() => CloudPathModel)
+  Path?: CloudPathModel;
+}
+
+export class CloudDuplicateGroupModel {
+  @Expose()
+  @ApiProperty({ description: 'Unique identifier for this duplicate group' })
+  GroupId: string;
+
+  @Expose()
+  @ApiProperty({
+    description: 'Type of duplicate detection: "exact" or "similar"',
+  })
+  MatchType: string;
+
+  @Expose()
+  @ApiProperty({
+    description:
+      'Similarity percentage (100 for exact match, <100 for perceptual)',
+  })
+  Similarity: number;
+
+  @Expose()
+  @ApiProperty({ type: CloudDuplicateFileModel, isArray: true })
+  @Type(() => CloudDuplicateFileModel)
+  Files: CloudDuplicateFileModel[];
+
+  @Expose()
+  @ApiProperty({
+    description: 'Total bytes that could be reclaimed by removing duplicates',
+  })
+  PotentialSavingsBytes: number;
+}
+
+export class CloudDuplicateScanResultResponseModel {
+  @Expose()
+  @ApiProperty()
+  ScanId: string;
+
+  @Expose()
+  @ApiProperty({ enum: DuplicateScanStatus })
+  Status: string;
+
+  @Expose()
+  @ApiProperty()
+  TotalFilesScanned: number;
+
+  @Expose()
+  @ApiProperty()
+  TotalDuplicateGroups: number;
+
+  @Expose()
+  @ApiProperty()
+  TotalPotentialSavingsBytes: number;
+
+  @Expose()
+  @ApiProperty({ type: CloudDuplicateGroupModel, isArray: true })
+  @Type(() => CloudDuplicateGroupModel)
+  Groups: CloudDuplicateGroupModel[];
+
+  @Expose()
+  @ApiProperty({ required: false })
+  ScannedAt?: string;
+}
+
+export class CloudDuplicateScanCancelResponseModel {
+  @Expose()
+  @ApiProperty()
+  Cancelled: boolean;
 }
