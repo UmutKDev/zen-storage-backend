@@ -124,57 +124,13 @@ export class SubscriptionService {
     subscriptionId: string;
     isTrial?: boolean;
   }): Promise<boolean> {
-    await this.userRepository.findOneOrFail({ where: { Id: userId } });
-
-    const subscription = await this.subscriptionRepository.findOneOrFail({
-      where: { Id: subscriptionId },
-    });
-
-    // Mevcut aktif abonelik varsa sonlandır
-    const existingSubscription = await this.userSubscriptionRepository.findOne({
-      where: { User: { Id: userId } },
-    });
-
-    if (existingSubscription) {
-      existingSubscription.EndAt = new Date();
-      existingSubscription.Status = SubscriptionStatus.CANCELLED;
-      await this.userSubscriptionRepository.save(existingSubscription);
-      // Eski aboneliği sil
-      await this.userSubscriptionRepository.remove(existingSubscription);
-    }
-
-    const entity = this.userSubscriptionRepository.create({
-      User: {
-        Id: userId,
-      },
-      Subscription: {
-        Id: subscriptionId,
-      },
-      Status: isTrial ? SubscriptionStatus.TRIALING : SubscriptionStatus.ACTIVE,
-      StartAt: new Date(),
-      Currency: subscription.Currency,
-      BillingCycle: subscription.BillingCycle,
-    });
-
-    await this.userSubscriptionRepository.save(entity);
-
-    // Invalidate user subscription cache
-    await this.RedisService.Delete(SubscriptionKeys.UserSubscription(userId));
-
-    // Notify user about subscription change
-    this.NotificationService.EmitToUser(
+    return this.performSubscription({
       userId,
-      NotificationType.SUBSCRIPTION_CHANGED,
-      'Subscription Updated',
-      `Your subscription has been changed to "${subscription.Name}".`,
-      {
-        SubscriptionId: subscriptionId,
-        SubscriptionName: subscription.Name,
-        IsTrial: isTrial ?? false,
-      },
-    );
-
-    return true;
+      subscriptionId,
+      isTrial,
+      notificationTitle: 'Subscription Updated',
+      notificationMessage: 'Your subscription has been changed to "{name}".',
+    });
   }
 
   async SubscribeSelf({
@@ -186,58 +142,13 @@ export class SubscriptionService {
     subscriptionId: string;
     isTrial?: boolean;
   }): Promise<boolean> {
-    // ensure user exists
-    await this.userRepository.findOneOrFail({ where: { Id: userId } });
-
-    const subscription = await this.subscriptionRepository.findOneOrFail({
-      where: { Id: subscriptionId },
-    });
-
-    // Mevcut aktif abonelik varsa sonlandır
-    const existingSubscription = await this.userSubscriptionRepository.findOne({
-      where: { User: { Id: userId } },
-    });
-
-    if (existingSubscription) {
-      existingSubscription.EndAt = new Date();
-      existingSubscription.Status = SubscriptionStatus.CANCELLED;
-      await this.userSubscriptionRepository.save(existingSubscription);
-      // Eski aboneliği sil
-      await this.userSubscriptionRepository.remove(existingSubscription);
-    }
-
-    const entity = this.userSubscriptionRepository.create({
-      User: {
-        Id: userId,
-      },
-      Subscription: {
-        Id: subscriptionId,
-      },
-      Status: isTrial ? SubscriptionStatus.TRIALING : SubscriptionStatus.ACTIVE,
-      StartAt: new Date(),
-      Currency: subscription.Currency,
-      BillingCycle: subscription.BillingCycle,
-    });
-
-    await this.userSubscriptionRepository.save(entity);
-
-    // Invalidate user subscription cache
-    await this.RedisService.Delete(SubscriptionKeys.UserSubscription(userId));
-
-    // Notify user about self-subscription
-    this.NotificationService.EmitToUser(
+    return this.performSubscription({
       userId,
-      NotificationType.SUBSCRIPTION_CHANGED,
-      'Subscription Activated',
-      `You have subscribed to "${subscription.Name}".`,
-      {
-        SubscriptionId: subscriptionId,
-        SubscriptionName: subscription.Name,
-        IsTrial: isTrial ?? false,
-      },
-    );
-
-    return true;
+      subscriptionId,
+      isTrial,
+      notificationTitle: 'Subscription Activated',
+      notificationMessage: 'You have subscribed to "{name}".',
+    });
   }
 
   async GetCurrentForUser({
@@ -310,6 +221,73 @@ export class SubscriptionService {
       NotificationType.SUBSCRIPTION_CANCELLED,
       'Subscription Cancelled',
       'Your subscription has been cancelled.',
+    );
+
+    return true;
+  }
+
+  private async performSubscription({
+    userId,
+    subscriptionId,
+    isTrial,
+    notificationTitle,
+    notificationMessage,
+  }: {
+    userId: string;
+    subscriptionId: string;
+    isTrial?: boolean;
+    notificationTitle: string;
+    notificationMessage: string;
+  }): Promise<boolean> {
+    await this.userRepository.findOneOrFail({ where: { Id: userId } });
+    const subscription = await this.subscriptionRepository.findOneOrFail({
+      where: { Id: subscriptionId },
+    });
+
+    const queryRunner =
+      this.userSubscriptionRepository.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      const existing = await queryRunner.manager.findOne(
+        UserSubscriptionEntity,
+        { where: { User: { Id: userId } } },
+      );
+      if (existing) {
+        existing.EndAt = new Date();
+        existing.Status = SubscriptionStatus.CANCELLED;
+        await queryRunner.manager.save(existing);
+        await queryRunner.manager.remove(existing);
+      }
+      const entity = queryRunner.manager.create(UserSubscriptionEntity, {
+        User: { Id: userId },
+        Subscription: { Id: subscriptionId },
+        Status: isTrial ? SubscriptionStatus.TRIALING : SubscriptionStatus.ACTIVE,
+        StartAt: new Date(),
+        Currency: subscription.Currency,
+        BillingCycle: subscription.BillingCycle,
+      });
+      await queryRunner.manager.save(entity);
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+
+    // Cache ve notification işlemleri commit'ten sonra
+    await this.RedisService.Delete(SubscriptionKeys.UserSubscription(userId));
+    this.NotificationService.EmitToUser(
+      userId,
+      NotificationType.SUBSCRIPTION_CHANGED,
+      notificationTitle,
+      notificationMessage.replace('{name}', subscription.Name),
+      {
+        SubscriptionId: subscriptionId,
+        SubscriptionName: subscription.Name,
+        IsTrial: isTrial ?? false,
+      },
     );
 
     return true;

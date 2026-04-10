@@ -31,8 +31,6 @@ import { ConflictResolutionStrategy } from '@common/enums';
 
 @Injectable()
 export class CloudUploadService {
-  private readonly PresignedUrlExpirySeconds = 3600; // 1 hour
-
   constructor(
     private readonly CloudS3Service: CloudS3Service,
     private readonly CloudMetadataService: CloudMetadataService,
@@ -143,12 +141,12 @@ export class CloudUploadService {
     });
 
     const url = await getSignedUrl(this.CloudS3Service.GetClient(), command, {
-      expiresIn: this.PresignedUrlExpirySeconds,
+      expiresIn: this.CloudS3Service.PresignedUrlExpirySeconds,
     });
 
     return plainToInstance(CloudGetMultipartPartUrlResponseModel, {
       Url: url,
-      Expires: this.PresignedUrlExpirySeconds,
+      Expires: this.CloudS3Service.PresignedUrlExpirySeconds,
     });
   }
 
@@ -190,13 +188,13 @@ export class CloudUploadService {
         const url = await getSignedUrl(
           this.CloudS3Service.GetClient(),
           command,
-          { expiresIn: this.PresignedUrlExpirySeconds },
+          { expiresIn: this.CloudS3Service.PresignedUrlExpirySeconds },
         );
 
         return {
           PartNumber: partNumber,
           Url: url,
-          Expires: this.PresignedUrlExpirySeconds,
+          Expires: this.CloudS3Service.PresignedUrlExpirySeconds,
         };
       }),
     );

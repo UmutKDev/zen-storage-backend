@@ -26,8 +26,8 @@ import { ApiUsageTrackingInterceptor } from '../interceptors/api-usage-tracking.
 import { ApiScopes } from '../decorators/api-scopes.decorator';
 import { Idempotent } from '../decorators/api-idempotent.decorator';
 
-@Controller({ path: 'Directories', version: '1' })
-@ApiTags('API / Directories')
+@Controller({ path: 'Directory', version: '1' })
+@ApiTags('API / Directory')
 @Public()
 @UseGuards(ApiAuthGuard, ApiScopeGuard, ApiQuotaGuard, ApiRateLimitGuard)
 @UseInterceptors(

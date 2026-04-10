@@ -725,65 +725,96 @@ export class CloudListService {
       return [];
     }
 
-    const directories: CloudDirectoryModel[] = [];
+    // Faz 1: Tüm dizin bilgilerini sync olarak topla (await yok)
+    type PendingEntry = {
+      DirectoryName: string;
+      DirectoryPrefix: string;
+      normalizedPrefix: string;
+      isEncrypted: boolean;
+      isHidden: boolean;
+    };
+    const pending: PendingEntry[] = [];
     for (const commonPrefix of CommonPrefixesFiltered) {
-      if (commonPrefix.Prefix) {
-        const DirectoryName = commonPrefix.Prefix.replace(Prefix, '').replace(
-          '/',
-          '',
-        );
-        const DirectoryPrefix: string = commonPrefix.Prefix.replace(
-          GetStorageOwnerId(User) + '/',
-          '',
-        );
-        const normalizedPrefix = NormalizeDirectoryPath(DirectoryPrefix);
-        const isEncrypted = EncryptedFolders?.has(normalizedPrefix) ?? false;
+      if (!commonPrefix.Prefix) continue;
+      const DirectoryName = commonPrefix.Prefix
+        .replace(Prefix, '')
+        .replace('/', '');
+      const DirectoryPrefix: string = commonPrefix.Prefix.replace(
+        GetStorageOwnerId(User) + '/',
+        '',
+      );
+      const normalizedPrefix = NormalizeDirectoryPath(DirectoryPrefix);
+      pending.push({
+        DirectoryName,
+        DirectoryPrefix,
+        normalizedPrefix,
+        isEncrypted: EncryptedFolders?.has(normalizedPrefix) ?? false,
+        isHidden: HiddenFolders?.has(normalizedPrefix) ?? false,
+      });
+    }
 
-        let isLocked = true;
-        if (isEncrypted && SessionToken && ValidateDirectorySession) {
-          const session = await ValidateDirectorySession(
-            GetStorageOwnerId(User),
-            normalizedPrefix,
-            SessionToken,
-          );
-          isLocked = !session;
-        }
+    // Faz 2: Tüm session validasyonlarını tek seferde paralel çalıştır
+    const toValidateEncrypted = pending
+      .filter((e) => e.isEncrypted)
+      .map((e) => e.normalizedPrefix);
+    const toValidateHidden = pending
+      .filter((e) => e.isHidden)
+      .map((e) => e.normalizedPrefix);
 
-        const isHidden = HiddenFolders?.has(normalizedPrefix) ?? false;
+    const ownerId = GetStorageOwnerId(User);
+    const [encResults, hidResults] = await Promise.all([
+      SessionToken && ValidateDirectorySession
+        ? Promise.all(
+            toValidateEncrypted.map((p) =>
+              ValidateDirectorySession(ownerId, p, SessionToken),
+            ),
+          )
+        : Promise.resolve(toValidateEncrypted.map(() => null)),
+      HiddenSessionToken && ValidateHiddenSession
+        ? Promise.all(
+            toValidateHidden.map((p) =>
+              ValidateHiddenSession(ownerId, p, HiddenSessionToken),
+            ),
+          )
+        : Promise.resolve(toValidateHidden.map(() => null)),
+    ]);
 
-        if (isHidden) {
-          let isConcealed = true;
-          if (HiddenSessionToken && ValidateHiddenSession) {
-            const hiddenSession = await ValidateHiddenSession(
-              GetStorageOwnerId(User),
-              normalizedPrefix,
-              HiddenSessionToken,
-            );
+    const encMap = new Map(
+      toValidateEncrypted.map((p, i) => [p, !!encResults[i]]),
+    );
+    const hidMap = new Map(
+      toValidateHidden.map((p, i) => [p, !!hidResults[i]]),
+    );
 
-            isConcealed = !hiddenSession;
-          }
-          if (isConcealed) {
-            continue;
-          }
+    // Faz 3: Sonuçları map'ten okuyarak sync assembly yap
+    const directories: CloudDirectoryModel[] = [];
+    for (const entry of pending) {
+      const { DirectoryName, DirectoryPrefix, normalizedPrefix, isEncrypted, isHidden } =
+        entry;
+      const isLocked = isEncrypted
+        ? !(encMap.get(normalizedPrefix) ?? false)
+        : false;
 
-          directories.push({
-            Name: DirectoryName,
-            Prefix: DirectoryPrefix,
-            IsEncrypted: isEncrypted,
-            IsLocked: isEncrypted ? isLocked : false,
-            IsHidden: true,
-            IsConcealed: false,
-          });
-        } else {
-          directories.push({
-            Name: DirectoryName,
-            Prefix: DirectoryPrefix,
-            IsEncrypted: isEncrypted,
-            IsLocked: isEncrypted ? isLocked : false,
-            IsHidden: false,
-            IsConcealed: false,
-          });
-        }
+      if (isHidden) {
+        const isConcealed = !(hidMap.get(normalizedPrefix) ?? false);
+        if (isConcealed) continue;
+        directories.push({
+          Name: DirectoryName,
+          Prefix: DirectoryPrefix,
+          IsEncrypted: isEncrypted,
+          IsLocked: isEncrypted ? isLocked : false,
+          IsHidden: true,
+          IsConcealed: false,
+        });
+      } else {
+        directories.push({
+          Name: DirectoryName,
+          Prefix: DirectoryPrefix,
+          IsEncrypted: isEncrypted,
+          IsLocked: isEncrypted ? isLocked : false,
+          IsHidden: false,
+          IsConcealed: false,
+        });
       }
     }
 

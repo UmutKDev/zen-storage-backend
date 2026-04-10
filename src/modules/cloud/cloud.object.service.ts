@@ -31,7 +31,6 @@ import { ConflictResolutionStrategy } from '@common/enums';
 @Injectable()
 export class CloudObjectService {
   private readonly Logger = new Logger(CloudObjectService.name);
-  private readonly PresignedUrlExpirySeconds = 3600; // 1 hour
 
   constructor(
     private readonly CloudS3Service: CloudS3Service,
@@ -96,7 +95,7 @@ export class CloudObjectService {
       });
 
       const url = await getSignedUrl(this.CloudS3Service.GetClient(), command, {
-        expiresIn: ExpiresInSeconds || this.PresignedUrlExpirySeconds,
+        expiresIn: ExpiresInSeconds || this.CloudS3Service.PresignedUrlExpirySeconds,
       });
 
       return url;

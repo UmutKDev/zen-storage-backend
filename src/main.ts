@@ -16,6 +16,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { useContainer } from 'class-validator';
 import basicAuth from 'express-basic-auth';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 
 import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
@@ -26,7 +27,10 @@ dayjs.extend(timezone);
 
 const corsOrigins =
   process.env.NODE_ENV === 'development'
-    ? ['*', 'http://localhost:3000']
+    ? (process.env.CORS_ORIGINS_DEV?.split(',') ?? [
+        'http://localhost:3000',
+        'http://localhost:4000',
+      ])
     : ['https://api.storage.umutk.me', 'https://storage.umutk.me'];
 
 async function bootstrap() {
@@ -41,8 +45,11 @@ async function bootstrap() {
 
   app.enableVersioning({ type: VersioningType.URI });
 
-  app.use(json({ limit: '50mb' }));
-  app.use(urlencoded({ extended: true, limit: '50mb' }));
+  app.use(helmet());
+
+  const payloadLimit = process.env.PAYLOAD_LIMIT ?? '10mb';
+  app.use(json({ limit: payloadLimit }));
+  app.use(urlencoded({ extended: true, limit: payloadLimit }));
   app.use(cookieParser());
 
   app.useGlobalPipes(
@@ -112,7 +119,7 @@ const SwaggerConfig = new DocumentBuilder()
   .addTag('Definition')
   .addTag('Cloud')
   .addTag('Cloud / Upload')
-  .addTag('Cloud / Directories')
+  .addTag('Cloud / Directory')
   .addTag('Cloud / Archive')
   .addTag('Cloud / Documents')
   .addTag('Team')
@@ -122,7 +129,7 @@ const SwaggerConfig = new DocumentBuilder()
   .addTag('API / Storage')
   .addTag('API / Upload')
   .addTag('API / Download')
-  .addTag('API / Directories')
+  .addTag('API / Directory')
   .addTag('API / Webhooks')
   .addTag('API / Usage')
   .addCookieAuth('session_id')

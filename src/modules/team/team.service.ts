@@ -46,23 +46,34 @@ export class TeamService {
       throw new HttpException('A team with this name already exists', 409);
     }
 
-    const team = await this.teamRepository.save(
-      new TeamEntity({
-        Name: Model.Name,
-        Slug: slug,
-        Description: Model.Description,
-      }),
-    );
-
-    // Add creator as OWNER
-    await this.teamMemberRepository.save(
-      new TeamMemberEntity({
-        Team: team,
-        User: { Id: User.Id } as UserEntity,
-        Role: TeamRole.OWNER,
-        JoinedAt: new Date(),
-      }),
-    );
+    const queryRunner =
+      this.teamRepository.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    let team: TeamEntity;
+    try {
+      team = await queryRunner.manager.save(
+        new TeamEntity({
+          Name: Model.Name,
+          Slug: slug,
+          Description: Model.Description,
+        }),
+      );
+      await queryRunner.manager.save(
+        new TeamMemberEntity({
+          Team: team,
+          User: { Id: User.Id } as UserEntity,
+          Role: TeamRole.OWNER,
+          JoinedAt: new Date(),
+        }),
+      );
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
 
     await this.InvalidateUserTeamsCache(User.Id);
 
@@ -95,20 +106,31 @@ export class TeamService {
       relations: ['Team'],
     });
 
-    const result: TeamResponseModel[] = [];
-    for (const membership of memberships) {
-      if (!membership.Team || membership.Team.DeletedAt) continue;
-      const memberCount = await this.teamMemberRepository.count({
-        where: { Team: { Id: membership.Team.Id } },
-      });
-      result.push(
-        plainToInstance(TeamResponseModel, {
-          ...membership.Team,
-          MemberCount: memberCount,
-          MyRole: membership.Role,
-        }),
-      );
-    }
+    const validMemberships = memberships.filter(
+      (m) => m.Team && !m.Team.DeletedAt,
+    );
+
+    const teamIds = validMemberships.map((m) => m.Team.Id);
+    const countRows: { teamId: string; count: string }[] = teamIds.length
+      ? await this.teamMemberRepository
+          .createQueryBuilder('tm')
+          .select('tm.TeamId', 'teamId')
+          .addSelect('COUNT(tm.Id)', 'count')
+          .where('tm.TeamId IN (:...teamIds)', { teamIds })
+          .groupBy('tm.TeamId')
+          .getRawMany()
+      : [];
+    const countMap = new Map(
+      countRows.map((r) => [r.teamId, parseInt(r.count, 10)]),
+    );
+
+    const result: TeamResponseModel[] = validMemberships.map((membership) =>
+      plainToInstance(TeamResponseModel, {
+        ...membership.Team,
+        MemberCount: countMap.get(membership.Team.Id) ?? 0,
+        MyRole: membership.Role,
+      }),
+    );
 
     await this.RedisService.Set(cacheKey, result, TEAM_LIST_CACHE_TTL);
     return result;
@@ -123,17 +145,37 @@ export class TeamService {
       await this.RedisService.Get<TeamDetailResponseModel>(cacheKey);
     if (cached) return cached;
 
-    const team = await this.teamRepository.findOne({ where: { Id: TeamId } });
-    if (!team) {
+    const teamResult = await this.teamRepository
+      .createQueryBuilder('t')
+      .leftJoin('t.Members', 'tm')
+      .select([
+        't.Id',
+        't.Name',
+        't.Slug',
+        't.Description',
+        't.Image',
+        't.Status',
+        't.StorageLimitBytes',
+        't.MaxUploadSizeBytes',
+        't.MaxObjectCount',
+        't.MaxMembers',
+        't.Features',
+        't.CreatedAt',
+        't.UpdatedAt',
+      ])
+      .addSelect('COUNT(tm.Id)', 'MemberCount')
+      .where('t.Id = :TeamId', { TeamId })
+      .groupBy('t.Id')
+      .getRawAndEntities();
+
+    if (!teamResult.entities[0]) {
       throw new HttpException('Team not found', 404);
     }
+    const team = teamResult.entities[0];
+    const memberCount = parseInt(teamResult.raw[0]?.MemberCount ?? '0', 10);
 
     const membership = await this.teamMemberRepository.findOne({
       where: { Team: { Id: TeamId }, User: { Id: User.Id } },
-    });
-
-    const memberCount = await this.teamMemberRepository.count({
-      where: { Team: { Id: TeamId } },
     });
 
     const result = plainToInstance(TeamDetailResponseModel, {
@@ -205,9 +247,9 @@ export class TeamService {
       where: { Team: { Id: TeamId } },
       relations: ['User'],
     });
-    for (const member of members) {
-      await this.InvalidateUserTeamsCache(member.User.Id);
-    }
+    await Promise.all(
+      members.map((member) => this.InvalidateUserTeamsCache(member.User.Id)),
+    );
     await this.InvalidateTeamCaches(TeamId);
 
     return true;

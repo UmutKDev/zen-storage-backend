@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -rn \"LIKE\\\\|%\\\\|:\\\\$\\\\|template\" /Users/umut.kiziloglu/Documents/Projects/Personal/nestjs-storage/src/modules --include=\"*.ts\")",
+      "Bash(grep -r \"PresignedUrlExpirySeconds\\\\|3600\" /Users/umut.kiziloglu/Documents/Projects/Personal/nestjs-storage/src/modules/cloud/*.service.ts)",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('/Users/umut.kiziloglu/Documents/Projects/Personal/nestjs-storage/package.json'\\)\\); deps={**d.get\\('dependencies',{}\\), **d.get\\('devDependencies',{}\\)}; print\\('helmet' in deps, deps.get\\('helmet','not found'\\)\\)\")",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "WebFetch(domain:code.visualstudio.com)"
+    ]
+  }
+}

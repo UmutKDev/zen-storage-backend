@@ -1,4 +1,4 @@
-import { Injectable, HttpException } from '@nestjs/common';
+import { Injectable, HttpException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PasskeyEntity } from '@entities/passkey.entity';
@@ -37,6 +37,7 @@ import { AuthKeys } from '@modules/redis/redis.keys';
 
 @Injectable()
 export class PasskeyService {
+  private readonly logger = new Logger(PasskeyService.name);
   private readonly RP_NAME = process.env.APP_NAME || 'Storage';
   private readonly RP_ID = process.env.WEBAUTHN_RP_ID || 'localhost';
   private readonly ORIGIN = process.env.CLIENT_APP_URL;
@@ -131,7 +132,8 @@ export class PasskeyService {
         expectedRPID: this.RP_ID,
       });
     } catch (error) {
-      throw new HttpException(`Verification failed: ${error.message}`, 400);
+      this.logger.error('Passkey registration verification failed', error?.stack);
+      throw new HttpException('Verification failed', 400);
     }
 
     if (!verification.verified || !verification.registrationInfo) {
@@ -259,7 +261,8 @@ export class PasskeyService {
         },
       });
     } catch (error) {
-      throw new HttpException(`Authentication failed: ${error.message}`, 400);
+      this.logger.error('Passkey authentication verification failed', error?.stack);
+      throw new HttpException('Authentication failed', 400);
     }
 
     if (!verification.verified) {

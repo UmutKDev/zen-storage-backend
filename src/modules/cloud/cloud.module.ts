@@ -4,7 +4,7 @@ import { AwsSdkModule } from 'aws-sdk-v3-nest';
 import { Agent } from 'https';
 import { CloudController } from './cloud.controller';
 import { CloudUploadController } from './cloud.upload.controller';
-import { CloudDirectoriesController } from './cloud.directories.controller';
+import { CloudDirectoryController } from './cloud.directory.controller';
 import { CloudArchiveController } from './cloud.archive.controller';
 import { CloudService } from './cloud.service';
 import { UserSubscriptionEntity } from '@entities/user-subscription.entity';
@@ -46,7 +46,7 @@ import { CloudDuplicateService } from './cloud.duplicate.service';
   controllers: [
     CloudController,
     CloudUploadController,
-    CloudDirectoriesController,
+    CloudDirectoryController,
     CloudArchiveController,
   ],
   providers: [

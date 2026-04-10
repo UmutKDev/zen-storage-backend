@@ -1,0 +1,20 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "command": "yarn lint --max-warnings=0 2>&1 | tail -5 || true",
+        "description": "Run ESLint before responding to catch obvious issues in modified files",
+        "timeout": 30
+      }
+    ],
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": "echo 'Code written. Reminder checklist:\n- Entity/Model properties PascalCase?\n- @Expose() + @ApiProperty() + validator on all response model props?\n- No repository injection in controllers?\n- HttpException used (not raw Error)?\n- Cache invalidation added to mutation methods?\n- @ApiOperation + @ApiSuccessResponse on new controller methods?\n- S3 keys built with KeyBuilder([GetStorageOwnerId(user), path])?' 2>&1 || true",
+        "description": "Post-write convention reminders for service and model files",
+        "timeout": 5
+      }
+    ]
+  }
+}

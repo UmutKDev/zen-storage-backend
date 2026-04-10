@@ -34,8 +34,8 @@ import { TEAM_ID_HEADER } from '@modules/team/guards/team-context.guard';
 import { CheckPolicies } from '@modules/authentication/casl/check-policies.decorator';
 import { CaslAction, CaslSubject } from '@common/enums';
 
-@Controller('Cloud/Directories')
-@ApiTags('Cloud / Directories')
+@Controller('Cloud/Directory')
+@ApiTags('Cloud / Directory')
 @ApiCookieAuth()
 @ApiHeader({
   name: TEAM_ID_HEADER,
@@ -43,7 +43,7 @@ import { CaslAction, CaslSubject } from '@common/enums';
   description:
     'Optional team ID. When provided, directory operations target the team storage.',
 })
-export class CloudDirectoriesController {
+export class CloudDirectoryController {
   constructor(private readonly cloudService: CloudService) {}
 
   @CheckPolicies((Ability) =>
