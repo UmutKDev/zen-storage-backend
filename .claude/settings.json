@@ -1,0 +1,46 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(yarn install)",
+      "Bash(yarn start:dev)",
+      "Bash(yarn start:debug)",
+      "Bash(yarn build)",
+      "Bash(yarn lint)",
+      "Bash(yarn format)",
+      "Bash(yarn test)",
+      "Bash(yarn test:cov)",
+      "Bash(yarn test:e2e)",
+      "Bash(yarn jest:*)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(yarn migration:generate:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git stash list:*)",
+      "Bash(find . -type f:*)",
+      "Bash(find . -type d:*)",
+      "Bash(rg:*)",
+      "Bash(ls:*)",
+      "Bash(wc:*)"
+    ],
+    "deny": [
+      "Read(//Users/umut.kiziloglu/Documents/Projects/Personal/nestjs-storage/.env)",
+      "Read(//Users/umut.kiziloglu/Documents/Projects/Personal/nestjs-storage/.env.local)",
+      "Read(//Users/umut.kiziloglu/Documents/Projects/Personal/nestjs-storage/.env.production)",
+      "Read(//Users/umut.kiziloglu/Documents/Projects/Personal/nestjs-storage/.env.development)",
+      "Bash(rm -rf:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git push origin master:*)"
+    ],
+    "ask": [
+      "Bash(yarn migration:run)",
+      "Bash(yarn migration:revert)",
+      "Bash(yarn typeorm migration:run:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker-compose:*)"
+    ]
+  }
+}
