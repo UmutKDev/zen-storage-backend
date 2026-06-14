@@ -8,6 +8,7 @@ import {
 import { User } from '@common/decorators/user.decorator';
 import { CheckPolicies } from '@modules/authentication/casl/check-policies.decorator';
 import { CaslAction, CaslSubject } from '@common/enums';
+import { ApiSuccessResponse } from '@common/decorators/response.decorator';
 
 @Controller('Subscription')
 @ApiTags('Subscription')
@@ -19,6 +20,7 @@ export class SubscriptionUserController {
     Ability.can(CaslAction.Read, CaslSubject.MySubscription),
   )
   @Get('My')
+  @ApiSuccessResponse(UserSubscriptionResponseModel)
   async My(
     @User() user: UserContext,
   ): Promise<UserSubscriptionResponseModel | null> {

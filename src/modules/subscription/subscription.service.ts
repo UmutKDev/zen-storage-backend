@@ -262,7 +262,9 @@ export class SubscriptionService {
       const entity = queryRunner.manager.create(UserSubscriptionEntity, {
         User: { Id: userId },
         Subscription: { Id: subscriptionId },
-        Status: isTrial ? SubscriptionStatus.TRIALING : SubscriptionStatus.ACTIVE,
+        Status: isTrial
+          ? SubscriptionStatus.TRIALING
+          : SubscriptionStatus.ACTIVE,
         StartAt: new Date(),
         Currency: subscription.Currency,
         BillingCycle: subscription.BillingCycle,

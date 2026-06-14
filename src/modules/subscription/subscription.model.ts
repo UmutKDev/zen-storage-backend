@@ -102,14 +102,6 @@ export class UserSubscriptionViewModel {
   Id: string;
 
   @Expose()
-  @ApiProperty({ format: 'uuid' })
-  UserId: string;
-
-  @Expose()
-  @ApiProperty({ format: 'uuid' })
-  SubscriptionId: string;
-
-  @Expose()
   @ApiProperty()
   StartAt: Date;
 
@@ -130,10 +122,6 @@ export class UserSubscriptionViewModel {
   Currency?: string;
 
   @Expose()
-  @ApiProperty({ required: false })
-  ProviderSubscriptionId?: string | null;
-
-  @Expose()
   @ApiProperty({ required: false, type: SubscriptionResponseModel })
   @Type(() => SubscriptionResponseModel)
   Subscription?: SubscriptionResponseModel;
@@ -146,7 +134,7 @@ export class UserSubscriptionViewModel {
 
 export class UserSubscriptionResponseModel extends OmitType(
   UserSubscriptionViewModel,
-  ['UserId', 'SubscriptionId', 'ProviderSubscriptionId'] as const,
+  [] as const,
 ) {}
 
 export class SubscribeRequestModel {
