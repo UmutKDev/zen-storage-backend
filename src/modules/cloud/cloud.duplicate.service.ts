@@ -17,6 +17,7 @@ import { Job, Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import sharp from 'sharp';
 import { CloudS3Service } from './cloud.s3.service';
+import { CloudDirectoryService } from './cloud.directory.service';
 import { RedisService } from '@modules/redis/redis.service';
 import { CloudKeys } from '@modules/redis/redis.keys';
 import {
@@ -33,7 +34,7 @@ import {
 } from '@common/enums';
 import { IsImageFile, KeyBuilder } from '@common/helpers/cast.helper';
 import { GetStorageOwnerId, GetCacheOwnerId } from './cloud.context';
-import { BuildBullRedisConnectionOptions } from './cloud.utils';
+import { BuildBullRedisConnectionOptions, IsInsideFolder } from './cloud.utils';
 import { uuidGenerator } from '@common/helpers/cast.helper';
 import {
   CloudDuplicateScanStartRequestModel,
@@ -118,6 +119,7 @@ export class CloudDuplicateService implements OnModuleInit, OnModuleDestroy {
     private readonly CloudS3Service: CloudS3Service,
     private readonly RedisService: RedisService,
     private readonly NotificationService: NotificationService,
+    private readonly CloudDirectoryService: CloudDirectoryService,
   ) {}
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -332,7 +334,23 @@ export class CloudDuplicateService implements OnModuleInit, OnModuleDestroy {
       );
 
       const prefix = Path ? KeyBuilder([OwnerId, Path]) : `${OwnerId}/`;
-      const files = await this.ListAllObjects(prefix, Recursive, OwnerId);
+      // A background scan carries no unlock/reveal session, so encrypted (locked)
+      // and hidden (concealed) folder contents must NEVER surface in duplicate
+      // results (privacy — mirrors the normal listing's exclusion). OwnerId is the
+      // pre-resolved storage owner; a `{ Id: OwnerId }` user round-trips through
+      // GetStorageOwnerId to the same owner for the manifest lookup.
+      const scanUser = { Id: OwnerId } as UserContext;
+      const [encryptedFolders, hiddenFolders] = await Promise.all([
+        this.CloudDirectoryService.GetEncryptedFolderSet(scanUser),
+        this.CloudDirectoryService.GetHiddenFolderSet(scanUser),
+      ]);
+      const files = await this.ListAllObjects(
+        prefix,
+        Recursive,
+        OwnerId,
+        encryptedFolders,
+        hiddenFolders,
+      );
 
       if (await this.IsCancelled(ScanId)) {
         await this.HandleCancellation(ScanId, UserId, cacheOwnerId);
@@ -674,6 +692,8 @@ export class CloudDuplicateService implements OnModuleInit, OnModuleDestroy {
     prefix: string,
     recursive: boolean,
     ownerId: string,
+    encryptedFolders: Set<string>,
+    hiddenFolders: Set<string>,
   ): Promise<FileRecord[]> {
     const bucket = this.CloudS3Service.GetBuckets().Storage;
     const files: FileRecord[] = [];
@@ -702,7 +722,18 @@ export class CloudDuplicateService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
+        // Skip secure-folder system manifests + the contents of encrypted
+        // (locked) and hidden (concealed) folders — never surface them in scan
+        // results (privacy; mirrors the normal listing's exclusion).
+        if (obj.Key.includes('.secure/')) continue;
         const relativeKey = this.CloudS3Service.GetKey(obj.Key, ownerId);
+        const relativePath = relativeKey.replace(/^\/+|\/+$/g, '');
+        if (
+          IsInsideFolder(relativePath, encryptedFolders) ||
+          IsInsideFolder(relativePath, hiddenFolders)
+        ) {
+          continue;
+        }
 
         files.push({
           Key: relativeKey,

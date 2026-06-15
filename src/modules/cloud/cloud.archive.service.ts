@@ -34,12 +34,14 @@ import {
 } from './cloud.model';
 import { CloudS3Service } from './cloud.s3.service';
 import { CloudMetadataService } from './cloud.metadata.service';
+import { CloudDirectoryService } from './cloud.directory.service';
 import { KeyBuilder, MimeTypeFromExtension } from '@common/helpers/cast.helper';
 import { GetStorageOwnerId } from './cloud.context';
 import {
   BuildArchiveExtractPrefix,
   BuildBullRedisConnectionOptions,
   GetArchiveFormat,
+  IsInsideFolder,
   JoinKey,
   NormalizeArchiveEntryPath,
   ArchiveFormatExtension,
@@ -229,6 +231,7 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
     private readonly CloudListService: CloudListService,
     private readonly ArchiveHandlerRegistry: ArchiveHandlerRegistry,
     private readonly NotificationService: NotificationService,
+    private readonly CloudDirectoryService: CloudDirectoryService,
   ) {}
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -869,11 +872,25 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
+      // A background create job carries no unlock/reveal session, so encrypted
+      // (locked) and hidden (concealed) folder contents must NEVER be swept into
+      // the archive (privacy — mirrors the normal listing's exclusion, and the
+      // duplicate-scan fix). ownerId is the pre-resolved storage owner; a
+      // `{ Id: ownerId }` user round-trips through GetStorageOwnerId to the same
+      // owner for the manifest lookup.
+      const owner = { Id: ownerId } as UserContext;
+      const [encryptedFolders, hiddenFolders] = await Promise.all([
+        this.CloudDirectoryService.GetEncryptedFolderSet(owner),
+        this.CloudDirectoryService.GetHiddenFolderSet(owner),
+      ]);
+
       // Resolve all entries (expand directories)
       const entries = await this.ResolveCreateEntries(
         ownerId,
         keys,
         commonParent,
+        encryptedFolders,
+        hiddenFolders,
       );
 
       if (entries.length === 0) {
@@ -1048,6 +1065,8 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
     ownerId: string,
     keys: string[],
     commonParent: string,
+    encryptedFolders: Set<string>,
+    hiddenFolders: Set<string>,
   ): Promise<ArchiveCreateEntry[]> {
     const entries: ArchiveCreateEntry[] = [];
 
@@ -1074,6 +1093,21 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
               continue;
             }
 
+            // Never sweep secure-folder system manifests or the contents of
+            // encrypted (locked) / hidden (concealed) folders into the archive —
+            // even when reached by expanding an explicitly selected parent
+            // directory (privacy; mirrors the normal listing's exclusion).
+            if (
+              this.IsSecurePath(
+                obj.Key,
+                ownerId,
+                encryptedFolders,
+                hiddenFolders,
+              )
+            ) {
+              continue;
+            }
+
             // Name relative to the common parent directory
             const relativeName = obj.Key.startsWith(`${ownerId}/`)
               ? obj.Key.slice(ownerId.length + 1)
@@ -1094,7 +1128,13 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
             : undefined;
         } while (continuationToken);
       } else {
-        // Single file
+        // Single file — also honour the secure-folder exclusion so a directly
+        // selected file inside a locked/hidden folder is never archived.
+        if (
+          this.IsSecurePath(s3Prefix, ownerId, encryptedFolders, hiddenFolders)
+        ) {
+          continue;
+        }
         try {
           const head = await this.CloudS3Service.Send(
             new HeadObjectCommand({
@@ -1120,6 +1160,31 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
     }
 
     return entries;
+  }
+
+  /**
+   * True when a full S3 key belongs to a secure folder that a background job
+   * must never read: a `.secure/` system manifest, or any object inside an
+   * encrypted (locked) or hidden (concealed) folder. Mirrors the duplicate-scan
+   * exclusion in `CloudDuplicateService.ListAllObjects`.
+   */
+  private IsSecurePath(
+    fullKey: string,
+    ownerId: string,
+    encryptedFolders: Set<string>,
+    hiddenFolders: Set<string>,
+  ): boolean {
+    if (fullKey.includes('.secure/')) {
+      return true;
+    }
+    const relativePath = this.CloudS3Service.GetKey(fullKey, ownerId).replace(
+      /^\/+|\/+$/g,
+      '',
+    );
+    return (
+      IsInsideFolder(relativePath, encryptedFolders) ||
+      IsInsideFolder(relativePath, hiddenFolders)
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
