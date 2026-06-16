@@ -7,7 +7,6 @@ import {
   ConflictResolutionStrategy,
   DuplicateScanPhase,
   DuplicateScanStatus,
-  ScanStatus,
 } from '@common/enums';
 import { CDNPathResolver, S3KeyConverter } from '@common/helpers/cast.helper';
 import { PaginationRequestModel } from '@common/models/pagination.model';
@@ -753,24 +752,6 @@ export class CloudUserStorageUsageResponseModel {
   @IsNumber()
   @Transform(({ value }) => Number(value))
   MaxUploadSizeBytes: number = 0;
-}
-
-export class CloudScanStatusResponseModel {
-  @Expose()
-  @ApiProperty({ enum: ScanStatus })
-  Status: string;
-
-  @Expose()
-  @ApiProperty({ required: false })
-  Reason?: string;
-
-  @Expose()
-  @ApiProperty({ required: false })
-  Signature?: string;
-
-  @Expose()
-  @ApiProperty({ required: false })
-  ScannedAt?: string;
 }
 
 export class CloudAbortMultipartUploadRequestModel {

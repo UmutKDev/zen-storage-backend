@@ -97,7 +97,6 @@ Several subsystems are gated; setting these matters for local dev:
 | Var | Default | Effect when off |
 |---|---|---|
 | `REDIS_ENABLED` | `true` | Disables cache + all BullMQ queues |
-| `CLOUD_AV_ENABLED` | `false` | Skips ClamAV scan job after upload |
 | `CLOUD_DUPLICATE_SCAN_ENABLED` | (check default) | Disables duplicate-scan queue |
 | `MONGO_ENABLED` | `true` | Disables audit log writes |
 

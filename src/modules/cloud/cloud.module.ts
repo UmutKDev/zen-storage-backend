@@ -21,7 +21,6 @@ import { ArchiveHandlerRegistry } from './archive/archive-handler.registry';
 import { CloudUploadService } from './cloud.upload.service';
 import { CloudDirectoryService } from './cloud.directory.service';
 import { CloudUsageService } from './cloud.usage.service';
-import { CloudScanService } from './cloud.scan.service';
 import { CloudConflictService } from './cloud.conflict.service';
 import { CloudVersionService } from './cloud.version.service';
 import { CloudDuplicateService } from './cloud.duplicate.service';
@@ -63,7 +62,6 @@ import { CloudDuplicateService } from './cloud.duplicate.service';
     CloudUploadService,
     CloudDirectoryService,
     CloudUsageService,
-    CloudScanService,
     CloudConflictService,
     CloudVersionService,
     CloudDuplicateService,
@@ -78,7 +76,6 @@ import { CloudDuplicateService } from './cloud.duplicate.service';
     CloudUploadService,
     CloudDirectoryService,
     CloudUsageService,
-    CloudScanService,
     CloudConflictService,
     CloudVersionService,
     CloudDuplicateService,

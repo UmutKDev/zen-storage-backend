@@ -34,7 +34,6 @@ import {
   CloudListDirectoriesRequestModel,
   CloudListObjectsRequestModel,
   CloudUserStorageUsageResponseModel,
-  CloudScanStatusResponseModel,
   CloudPreSignedUrlRequestModel,
   CloudSearchRequestModel,
   CloudSearchResponseModel,
@@ -230,20 +229,6 @@ export class CloudController {
     @User() user: UserContext,
   ): Promise<CloudUserStorageUsageResponseModel> {
     return this.cloudService.UserStorageUsage(user);
-  }
-
-  @ApiOperation({
-    summary: 'Get antivirus scan status for a file',
-    description:
-      'Returns the latest antivirus scan status for the given object key.',
-  })
-  @Get('Scan/Status')
-  @ApiSuccessResponse(CloudScanStatusResponseModel)
-  async ScanStatus(
-    @Query() model: CloudKeyRequestModel,
-    @User() user: UserContext,
-  ): Promise<CloudScanStatusResponseModel | null> {
-    return this.cloudService.GetScanStatus(model, user);
   }
 
   @ApiOperation({

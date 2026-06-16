@@ -67,14 +67,6 @@ export declare global {
       CLOUD_DOWNLOAD_RATE_TTL?: string;
       CLOUD_DOWNLOAD_RATE_LIMIT?: string;
 
-      // Cloud Antivirus
-      CLOUD_AV_ENABLED?: string;
-      CLOUD_AV_HOST?: string;
-      CLOUD_AV_PORT?: string;
-      CLOUD_AV_MAX_BYTES?: string;
-      CLOUD_AV_SOCKET_TIMEOUT_MS?: string;
-      CLOUD_AV_CONCURRENCY?: string;
-
       // Cloud Idempotency
       CLOUD_IDEMPOTENCY_TTL_SECONDS?: string;
 

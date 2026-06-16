@@ -67,14 +67,6 @@ enum ArchiveEntryType {
   DIRECTORY = 'directory',
 }
 
-enum ScanStatus {
-  PENDING = 'pending',
-  CLEAN = 'clean',
-  INFECTED = 'infected',
-  ERROR = 'error',
-  SKIPPED = 'skipped',
-}
-
 enum ConflictResolutionStrategy {
   FAIL = 'FAIL',
   REPLACE = 'REPLACE',
@@ -111,7 +103,6 @@ export {
   ArchivePhase,
   ArchiveFormat,
   ArchiveEntryType,
-  ScanStatus,
   ConflictResolutionStrategy,
   DuplicateScanStatus,
   DuplicateScanPhase,

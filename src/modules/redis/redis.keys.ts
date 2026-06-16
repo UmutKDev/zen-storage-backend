@@ -125,12 +125,6 @@ export namespace CloudKeys {
   ) =>
     `cloud:dir-thumbnails:${isSigned ? 'signed' : 'public'}:${userId}:${directoryPrefix}`;
 
-  /** cloud:scan:{userId}:{encodedKey} — AV scan status for a file */
-  export const ScanStatus = (userId: string, key: string) => {
-    const encodedKey = encodeURIComponent(key || '');
-    return `cloud:scan:${userId}:${encodedKey}`;
-  };
-
   /** @deprecated Use ArchiveExtractCancel instead */
   export const ZipExtractCancel = (jobId: string) =>
     `cloud:zip-extract:cancel:${jobId}`;

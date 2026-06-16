@@ -38,7 +38,6 @@ import {
   CloudUploadPartRequestModel,
   CloudUploadPartResponseModel,
   CloudUserStorageUsageResponseModel,
-  CloudScanStatusResponseModel,
   CloudPreSignedUrlRequestModel,
   CloudSearchRequestModel,
   CloudSearchResponseModel,
@@ -76,7 +75,6 @@ import { CloudArchiveService } from './cloud.archive.service';
 import { CloudUploadService } from './cloud.upload.service';
 import { CloudDirectoryService } from './cloud.directory.service';
 import { CloudUsageService } from './cloud.usage.service';
-import { CloudScanService } from './cloud.scan.service';
 import { CloudVersionService } from './cloud.version.service';
 import { CloudDuplicateService } from './cloud.duplicate.service';
 import { CloudS3Service } from './cloud.s3.service';
@@ -101,7 +99,6 @@ export class CloudService {
     private readonly CloudUploadService: CloudUploadService,
     private readonly CloudDirectoryService: CloudDirectoryService,
     private readonly CloudUsageService: CloudUsageService,
-    private readonly CloudScanService: CloudScanService,
     private readonly CloudVersionService: CloudVersionService,
     private readonly CloudDuplicateService: CloudDuplicateService,
     private readonly CloudS3Service: CloudS3Service,
@@ -385,25 +382,6 @@ export class CloudService {
     User: UserContext,
   ): Promise<CloudUserStorageUsageResponseModel> {
     return this.CloudUsageService.UserStorageUsage(User);
-  }
-
-  async GetScanStatus(
-    { Key }: CloudKeyRequestModel,
-    User: UserContext,
-  ): Promise<CloudScanStatusResponseModel | null> {
-    const status = await this.CloudScanService.GetScanStatus(
-      GetStorageOwnerId(User),
-      Key,
-    );
-    if (!status) {
-      return null;
-    }
-    return {
-      Status: status.status,
-      Reason: status.reason,
-      Signature: status.signature,
-      ScannedAt: status.scannedAt,
-    };
   }
 
   //#endregion
@@ -815,7 +793,6 @@ export class CloudService {
       uploadedSize,
     );
     await this.EnsureUploadedObjectWithinLimits(Key, User, uploadedSize);
-    await this.CloudScanService.EnqueueScan(GetStorageOwnerId(User), Key);
     await this.CloudListService.InvalidateThumbnailCacheForObjectKey(
       GetStorageOwnerId(User),
       Key,
