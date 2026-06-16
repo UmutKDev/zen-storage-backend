@@ -8,7 +8,10 @@ const REDIS_ENABLED =
   (process.env.REDIS_ENABLED ?? 'true').toLowerCase() !== 'false';
 
 const buildRedisUrl = (): string => {
-  const database = process.env.NODE_ENV === 'production' ? 0 : 1; // Use separate DB for development
+  // Environment-isolated cache DB: production → 0, test/dev → 1, so the live and
+  // test caches on a shared Redis instance never mix. (BullMQ stays on DB 0 via
+  // BuildBullRedisConnectionOptions — intentionally untouched.)
+  const database = process.env.NODE_ENV === 'production' ? 0 : 1;
   const host = process.env.REDIS_HOSTNAME ?? 'localhost';
   const port = process.env.REDIS_PORT ?? '6379';
   const password = process.env.REDIS_PASSWORD;

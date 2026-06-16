@@ -172,6 +172,9 @@ export const NormalizeArchiveEntryPath = (entryPath: string): string | null => {
 // Direct IORedis options for BullMQ queues/workers. These intentionally differ
 // from the cache-manager RedisService config (maxRetriesPerRequest: null is
 // required by BullMQ). Returns null when Redis env is not configured.
+//
+// Same environment-isolated DB as the cache (production → 0, test/dev → 1) so
+// test jobs never land in the live queue DB on a shared Redis instance.
 export const BuildBullRedisConnectionOptions = (): RedisOptions | null => {
   const host = process.env.REDIS_HOSTNAME;
   const portValue = process.env.REDIS_PORT ?? '';
@@ -183,6 +186,7 @@ export const BuildBullRedisConnectionOptions = (): RedisOptions | null => {
     host,
     port,
     password: process.env.REDIS_PASSWORD,
+    db: process.env.NODE_ENV === 'production' ? 0 : 1,
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
   };
