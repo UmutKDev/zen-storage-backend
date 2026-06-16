@@ -494,6 +494,26 @@ export class CloudArchiveExtractStartRequestModel {
   @IsString({ each: true })
   @IsOptional()
   SelectedEntries?: string[];
+
+  @ApiProperty({
+    required: false,
+    enum: ConflictResolutionStrategy,
+    description:
+      'How to handle an existing extract-output folder. Defaults to REPLACE.',
+  })
+  @IsEnum(ConflictResolutionStrategy)
+  @IsOptional()
+  Strategy?: ConflictResolutionStrategy;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'When true (default), extract into a new subfolder named after the ' +
+      'archive; when false, extract straight into the archive’s folder.',
+  })
+  @IsBoolean()
+  @IsOptional()
+  CreateFolder?: boolean;
 }
 
 export class CloudArchiveExtractStartResponseModel {

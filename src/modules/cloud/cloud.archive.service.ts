@@ -40,11 +40,14 @@ import { GetStorageOwnerId } from './cloud.context';
 import {
   BuildArchiveExtractPrefix,
   BuildBullRedisConnectionOptions,
+  EnsureTrailingSlash,
   GetArchiveFormat,
+  GetParentDirectoryPath,
   IsInsideFolder,
   JoinKey,
   NormalizeArchiveEntryPath,
   ArchiveFormatExtension,
+  SecureFoldersToExcludeForScan,
 } from './cloud.utils';
 import { RedisService } from '@modules/redis/redis.service';
 import { CloudKeys } from '@modules/redis/redis.keys';
@@ -57,6 +60,7 @@ import {
   ArchivePhase,
   ArchiveEntryType,
   ArchiveFormat,
+  ConflictResolutionStrategy,
   NotificationType,
 } from '@common/enums';
 import type {
@@ -74,7 +78,18 @@ type ArchiveExtractJobData = {
   key: string;
   format: ArchiveFormat;
   selectedEntries?: string[];
+  strategy?: ConflictResolutionStrategy;
+  createFolder?: boolean;
 };
+
+// How an extract resolves a per-entry write against existing content. Folder-level
+// strategies (new-subfolder KEEP_BOTH/FAIL) are settled before extraction starts,
+// so the per-entry plan only ever overwrites, skips, fails, or keep-both-renames.
+type ExtractConflictPlan =
+  | { mode: 'overwrite' }
+  | { mode: 'skip'; existing: Set<string> }
+  | { mode: 'fail'; existing: Set<string> }
+  | { mode: 'keepBoth'; existing: Set<string>; claimed: Set<string> };
 
 type ArchiveExtractJobResult = {
   extractedPath: string;
@@ -209,6 +224,9 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
     ),
   );
 
+  // ── Extract conflict (KEEP_BOTH auto-rename cap) ──────────────────────────
+  private readonly MaxExtractKeepBothIterations = 100;
+
   // ── Queue / Worker instances ──────────────────────────────────────────────
   private ExtractQueue?: Queue<ArchiveExtractJobData, ArchiveExtractJobResult>;
   private ExtractWorker?: Worker<
@@ -338,7 +356,12 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
   // ══════════════════════════════════════════════════════════════════════════
 
   async ArchiveExtractStart(
-    { Key, SelectedEntries }: CloudArchiveExtractStartRequestModel,
+    {
+      Key,
+      SelectedEntries,
+      Strategy,
+      CreateFolder,
+    }: CloudArchiveExtractStartRequestModel,
     User: UserContext,
   ): Promise<CloudArchiveExtractStartResponseModel> {
     const format = GetArchiveFormat(Key);
@@ -365,6 +388,8 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
       ownerId: GetStorageOwnerId(User),
       format,
       selectedEntries: SelectedEntries,
+      strategy: Strategy,
+      createFolder: CreateFolder,
     };
 
     const job = await this.ExtractQueue!.add('extract', jobData);
@@ -661,7 +686,7 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
   ): Promise<ArchiveExtractJobResult> {
     const jobId = job.id?.toString() ?? '';
     const cancelKey = CloudKeys.ArchiveExtractCancel(jobId);
-    const { key, format, selectedEntries } = job.data;
+    const { key, format, selectedEntries, strategy, createFolder } = job.data;
     // ownerId is the pre-resolved storage-owner from enqueue (GetStorageOwnerId already applied).
     // Use user.Id directly with KeyBuilder here; do NOT call GetStorageOwnerId again.
     const user = { Id: job.data.ownerId } as UserContext;
@@ -672,7 +697,12 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
     }
 
     const sourceKey = KeyBuilder([user.Id, key]);
-    const extractPrefix = BuildArchiveExtractPrefix(key, format);
+    // Default (CreateFolder omitted/true) → a new subfolder named after the
+    // archive; false → straight into the archive's own folder.
+    const useFolder = createFolder !== false;
+    const baseExtractPrefix = useFolder
+      ? BuildArchiveExtractPrefix(key, format)
+      : GetParentDirectoryPath(key);
     const normalizedKey = (key || '').replace(/^\/+|\/+$/g, '');
     const keyParts = normalizedKey.split('/').filter((part) => !!part);
     const filename = keyParts.pop() || '';
@@ -686,8 +716,23 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
       baseName = filename.replace(extPattern, '').trim();
     }
     const archiveBase = baseName || filename || 'extracted';
+    // Hoisted so the `finally` can refresh the right folder even if extraction
+    // throws after writing some entries.
+    let effectiveExtractPrefix = baseExtractPrefix;
 
     try {
+      // Resolve the effective output prefix + per-entry conflict plan ONCE, up
+      // front, from the strategy chosen in the extract dialog (a batch job can't
+      // prompt mid-extract). In subfolder mode KEEP_BOTH/FAIL settle at the folder
+      // level here; in same-folder mode they degrade to a per-entry plan.
+      const { prefix, plan: conflictPlan } = await this.ResolveExtractTarget(
+        user.Id,
+        baseExtractPrefix,
+        strategy ?? ConflictResolutionStrategy.REPLACE,
+        useFolder,
+      );
+      effectiveExtractPrefix = prefix;
+
       const object = await this.CloudS3Service.Send(
         new GetObjectCommand({
           Bucket: this.CloudS3Service.GetBuckets().Storage,
@@ -746,11 +791,12 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
 
             const task = this.UploadExtractedEntry(
               user,
-              extractPrefix,
+              effectiveExtractPrefix,
               effectivePath,
               entry.Type,
               entry.Stream,
               entry.Size,
+              conflictPlan,
             );
             await enqueue(task);
           },
@@ -807,13 +853,6 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      // Invalidate caches
-      await this.CloudListService.InvalidateDirectoryThumbnailCache(
-        user.Id,
-        extractPrefix,
-      );
-      await this.CloudListService.InvalidateListCache(user.Id);
-
       // Notify user
       const archiveName = key.split('/').pop() || key;
       this.NotificationService.EmitToUser(
@@ -824,12 +863,12 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
         {
           JobId: jobId,
           Key: key,
-          ExtractedPath: extractPrefix,
+          ExtractedPath: effectiveExtractPrefix,
           Format: format,
         },
       );
 
-      return { extractedPath: extractPrefix };
+      return { extractedPath: effectiveExtractPrefix };
     } catch (error) {
       this.Logger.error(
         `Failed to extract archive for key ${key} (format=${format})`,
@@ -848,6 +887,15 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
       throw error;
     } finally {
       await this.RedisService.Delete(cancelKey);
+      // Always refresh the affected folder's listing — even a partially-written
+      // (then failed/cancelled) extract leaves real files in S3, so the cached
+      // listing must not keep serving the pre-extract view. Runs on success and
+      // failure alike (the success path previously skipped this on any throw).
+      await this.CloudListService.InvalidateDirectoryThumbnailCache(
+        user.Id,
+        effectiveExtractPrefix,
+      );
+      await this.CloudListService.InvalidateListCache(user.Id);
     }
   }
 
@@ -872,25 +920,37 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      // A background create job carries no unlock/reveal session, so encrypted
-      // (locked) and hidden (concealed) folder contents must NEVER be swept into
-      // the archive (privacy — mirrors the normal listing's exclusion, and the
-      // duplicate-scan fix). ownerId is the pre-resolved storage owner; a
-      // `{ Id: ownerId }` user round-trips through GetStorageOwnerId to the same
-      // owner for the manifest lookup.
+      // Secure (encrypted/hidden) folder contents must never leak into an archive
+      // through a broad selection — EXCEPT the folder the user explicitly
+      // navigated into and archived from. They reached `commonParent` by
+      // revealing/unlocking it in the UI, so that ancestor-or-self secure folder
+      // is their deliberate target and must NOT be excluded (otherwise the
+      // archive comes back empty). Folders elsewhere — and strictly nested below
+      // the selection root — stay excluded. Mirrors the duplicate-scan scoping
+      // fix (`SecureFoldersToExcludeForScan`). ownerId is the pre-resolved
+      // storage owner; a `{ Id: ownerId }` user round-trips through
+      // GetStorageOwnerId to the same owner for the manifest lookup.
       const owner = { Id: ownerId } as UserContext;
       const [encryptedFolders, hiddenFolders] = await Promise.all([
         this.CloudDirectoryService.GetEncryptedFolderSet(owner),
         this.CloudDirectoryService.GetHiddenFolderSet(owner),
       ]);
+      const scopedEncrypted = SecureFoldersToExcludeForScan(
+        encryptedFolders,
+        commonParent,
+      );
+      const scopedHidden = SecureFoldersToExcludeForScan(
+        hiddenFolders,
+        commonParent,
+      );
 
       // Resolve all entries (expand directories)
       const entries = await this.ResolveCreateEntries(
         ownerId,
         keys,
         commonParent,
-        encryptedFolders,
-        hiddenFolders,
+        scopedEncrypted,
+        scopedHidden,
       );
 
       if (entries.length === 0) {
@@ -1005,6 +1065,177 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  // Private – Extract output conflict resolution
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Resolve where an extract should write and how per-entry collisions are
+   * handled, given the user's conflict strategy and whether they asked for a new
+   * subfolder.
+   *
+   * - `createFolder` (subfolder mode): the prefix is the conflict unit — FAIL
+   *   aborts when it exists, KEEP_BOTH retargets a fresh `name (n)/` sibling
+   *   (so entries write cleanly), SKIP keeps the prefix and skips colliding keys,
+   *   REPLACE overwrites.
+   * - same-folder mode: the prefix is the archive's own (always-existing) folder,
+   *   so collisions are inherently per-entry — KEEP_BOTH renames each colliding
+   *   file `name (n).ext`, SKIP/FAIL act per file, REPLACE overwrites.
+   */
+  private async ResolveExtractTarget(
+    ownerId: string,
+    baseExtractPrefix: string,
+    strategy: ConflictResolutionStrategy,
+    createFolder: boolean,
+  ): Promise<{ prefix: string; plan: ExtractConflictPlan }> {
+    const fullPrefix = EnsureTrailingSlash(
+      KeyBuilder([ownerId, baseExtractPrefix]),
+    );
+
+    if (createFolder) {
+      const occupied = await this.PrefixHasObjects(fullPrefix);
+      if (!occupied) {
+        return { prefix: baseExtractPrefix, plan: { mode: 'overwrite' } };
+      }
+      switch (strategy) {
+        case ConflictResolutionStrategy.FAIL:
+          throw new HttpException(
+            'A folder with the extract output name already exists.',
+            HttpStatus.CONFLICT,
+          );
+        case ConflictResolutionStrategy.KEEP_BOTH:
+          return {
+            prefix: await this.NextAvailableExtractPrefix(
+              ownerId,
+              baseExtractPrefix,
+            ),
+            plan: { mode: 'overwrite' },
+          };
+        case ConflictResolutionStrategy.SKIP:
+          return {
+            prefix: baseExtractPrefix,
+            plan: { mode: 'skip', existing: await this.ListExistingKeys(fullPrefix) },
+          };
+        default:
+          return { prefix: baseExtractPrefix, plan: { mode: 'overwrite' } };
+      }
+    }
+
+    // Same-folder mode — conflicts are per entry.
+    switch (strategy) {
+      case ConflictResolutionStrategy.SKIP:
+        return {
+          prefix: baseExtractPrefix,
+          plan: { mode: 'skip', existing: await this.ListExistingKeys(fullPrefix) },
+        };
+      case ConflictResolutionStrategy.FAIL:
+        return {
+          prefix: baseExtractPrefix,
+          plan: { mode: 'fail', existing: await this.ListExistingKeys(fullPrefix) },
+        };
+      case ConflictResolutionStrategy.KEEP_BOTH:
+        return {
+          prefix: baseExtractPrefix,
+          plan: {
+            mode: 'keepBoth',
+            existing: await this.ListExistingKeys(fullPrefix),
+            claimed: new Set<string>(),
+          },
+        };
+      default:
+        return { prefix: baseExtractPrefix, plan: { mode: 'overwrite' } };
+    }
+  }
+
+  /**
+   * Next free `dir/name (n).ext` for a full key that collides (same-folder
+   * KEEP_BOTH). `claimed` guards against two concurrent entries picking the same
+   * rename; both sets are checked so a rename never lands on a pre-existing key.
+   */
+  private NextAvailableEntryKey(
+    fullKey: string,
+    existing: Set<string>,
+    claimed: Set<string>,
+  ): string {
+    const slash = fullKey.lastIndexOf('/');
+    const dir = slash >= 0 ? fullKey.slice(0, slash + 1) : '';
+    const filename = slash >= 0 ? fullKey.slice(slash + 1) : fullKey;
+    const dot = filename.lastIndexOf('.');
+    const base = dot > 0 ? filename.slice(0, dot) : filename;
+    const ext = dot > 0 ? filename.slice(dot) : '';
+    for (let i = 1; i <= this.MaxExtractKeepBothIterations; i++) {
+      const candidate = `${dir}${base} (${i})${ext}`;
+      if (!existing.has(candidate) && !claimed.has(candidate)) {
+        return candidate;
+      }
+    }
+    throw new HttpException(
+      'Cannot auto-rename extracted file: too many copies exist.',
+      HttpStatus.CONFLICT,
+    );
+  }
+
+  /** True when at least one object exists under the given full (owner-scoped) prefix. */
+  private async PrefixHasObjects(fullPrefix: string): Promise<boolean> {
+    const result = await this.CloudS3Service.Send(
+      new ListObjectsV2Command({
+        Bucket: this.CloudS3Service.GetBuckets().Storage,
+        Prefix: fullPrefix,
+        MaxKeys: 1,
+      }),
+    );
+    return (result.KeyCount ?? result.Contents?.length ?? 0) > 0;
+  }
+
+  /**
+   * Next free `name (n)` sibling for a storage-relative extract prefix whose
+   * default target is occupied (KEEP_BOTH). Mirrors GenerateKeepBothKey but stays
+   * storage-relative — UploadExtractedEntry re-applies the owner prefix.
+   */
+  private async NextAvailableExtractPrefix(
+    ownerId: string,
+    extractPrefix: string,
+  ): Promise<string> {
+    const base = extractPrefix.replace(/\/+$/, '');
+    for (let i = 1; i <= this.MaxExtractKeepBothIterations; i++) {
+      const candidate = `${base} (${i})`;
+      const fullCandidate = EnsureTrailingSlash(
+        KeyBuilder([ownerId, candidate]),
+      );
+      if (!(await this.PrefixHasObjects(fullCandidate))) {
+        return candidate;
+      }
+    }
+    throw new HttpException(
+      'Cannot auto-rename extract output: too many copies exist.',
+      HttpStatus.CONFLICT,
+    );
+  }
+
+  /** All full S3 keys currently under a prefix (for SKIP collision detection). */
+  private async ListExistingKeys(fullPrefix: string): Promise<Set<string>> {
+    const keys = new Set<string>();
+    let continuationToken: string | undefined;
+    do {
+      const response = await this.CloudS3Service.Send(
+        new ListObjectsV2Command({
+          Bucket: this.CloudS3Service.GetBuckets().Storage,
+          Prefix: fullPrefix,
+          ContinuationToken: continuationToken,
+        }),
+      );
+      for (const obj of response.Contents ?? []) {
+        if (obj.Key) {
+          keys.add(obj.Key);
+        }
+      }
+      continuationToken = response.IsTruncated
+        ? response.NextContinuationToken
+        : undefined;
+    } while (continuationToken);
+    return keys;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   // Private – Upload extracted entry
   // ══════════════════════════════════════════════════════════════════════════
 
@@ -1015,6 +1246,7 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
     type: ArchiveEntryType,
     stream: Readable,
     size: number,
+    plan: ExtractConflictPlan,
   ): Promise<void> {
     if (type === ArchiveEntryType.DIRECTORY) {
       const directoryKey = JoinKey(
@@ -1022,10 +1254,16 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
         effectivePath,
         this.EmptyFolderPlaceholder,
       );
+      const fullDirKey = KeyBuilder([user.Id, directoryKey]);
+      // A folder that already exists is merged into (only files are
+      // skipped/renamed/aborted); leave its placeholder untouched.
+      if (plan.mode !== 'overwrite' && plan.existing.has(fullDirKey)) {
+        return;
+      }
       await this.CloudS3Service.Send(
         new PutObjectCommand({
           Bucket: this.CloudS3Service.GetBuckets().Storage,
-          Key: KeyBuilder([user.Id, directoryKey]),
+          Key: fullDirKey,
           Body: '',
         }),
       );
@@ -1033,6 +1271,30 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
     }
 
     const targetKey = JoinKey(extractPrefix, effectivePath);
+    let fullKey = KeyBuilder([user.Id, targetKey]);
+
+    if (plan.mode === 'skip' && plan.existing.has(fullKey)) {
+      // The existing file is left untouched; drain so the handler advances.
+      stream.resume();
+      return;
+    }
+    if (plan.mode === 'fail' && plan.existing.has(fullKey)) {
+      throw new HttpException(
+        `"${effectivePath}" already exists in the target folder.`,
+        HttpStatus.CONFLICT,
+      );
+    }
+    if (
+      plan.mode === 'keepBoth' &&
+      (plan.existing.has(fullKey) || plan.claimed.has(fullKey))
+    ) {
+      fullKey = this.NextAvailableEntryKey(fullKey, plan.existing, plan.claimed);
+    }
+    if (plan.mode === 'keepBoth') {
+      // Claim synchronously (before the await) so concurrent entries can't reuse it.
+      plan.claimed.add(fullKey);
+    }
+
     const entryFilename = effectivePath.split('/').pop() || '';
     const extension = entryFilename.includes('.')
       ? entryFilename.split('.').pop() || ''
@@ -1041,8 +1303,6 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
       ? MimeTypeFromExtension(extension) || undefined
       : undefined;
     const contentLength = Number.isFinite(size) ? size : undefined;
-
-    const fullKey = KeyBuilder([user.Id, targetKey]);
 
     await this.CloudS3Service.Send(
       new PutObjectCommand({
