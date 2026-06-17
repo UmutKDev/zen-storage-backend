@@ -1,4 +1,13 @@
-import { Body, Controller, Delete, Headers, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Headers,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import {
   ApiCookieAuth,
   ApiTags,
@@ -23,6 +32,10 @@ import {
   DirectoryRevealResponseModel,
   DirectoryConcealRequestModel,
   ConflictDetailsResponseModel,
+  DirectoryCreateStartRequestModel,
+  DirectoryCreateStartResponseModel,
+  DirectoryCreateStatusRequestModel,
+  DirectoryCreateStatusResponseModel,
 } from './cloud.model';
 import { ApiSuccessResponse } from '@common/decorators/response.decorator';
 import { User } from '@common/decorators/user.decorator';
@@ -83,6 +96,51 @@ export class CloudDirectoryController {
       user,
       sessionToken,
     );
+  }
+
+  @CheckPolicies((Ability) =>
+    Ability.can(CaslAction.Create, CaslSubject.CloudDirectory),
+  )
+  @ApiOperation({
+    summary: 'Start async plain directory creation',
+    description:
+      'Starts an async job to create a PLAIN (non-encrypted) directory and returns a JobId immediately. Conflict detection runs synchronously: FAIL returns 409, SKIP onto an existing folder returns an empty JobId (no-op), KEEP_BOTH resolves a new path. Progress + completion are pushed via WebSocket notifications. Encrypted directories must use POST /Cloud/Directory instead.',
+  })
+  @Post('Create/Start')
+  @ApiHeader({
+    name: FOLDER_SESSION_HEADER,
+    required: false,
+    description: 'Session token for encrypted folder access',
+  })
+  @ApiSuccessResponse(DirectoryCreateStartResponseModel)
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict detected — directory already exists',
+    type: ConflictDetailsResponseModel,
+  })
+  async DirectoryCreateStart(
+    @Body() model: DirectoryCreateStartRequestModel,
+    @User() user: UserContext,
+    @Headers(FOLDER_SESSION_HEADER) sessionToken?: string,
+  ): Promise<DirectoryCreateStartResponseModel> {
+    return this.cloudService.DirectoryCreateStart(model, user, sessionToken);
+  }
+
+  @CheckPolicies((Ability) =>
+    Ability.can(CaslAction.Read, CaslSubject.CloudDirectory),
+  )
+  @ApiOperation({
+    summary: 'Get directory-create job status',
+    description:
+      'Returns the current state + progress of an async directory-create job. Polling fallback for clients that missed socket progress events.',
+  })
+  @Get('Create/Status')
+  @ApiSuccessResponse(DirectoryCreateStatusResponseModel)
+  async DirectoryCreateStatus(
+    @Query() model: DirectoryCreateStatusRequestModel,
+    @User() user: UserContext,
+  ): Promise<DirectoryCreateStatusResponseModel> {
+    return this.cloudService.DirectoryCreateStatus(model, user);
   }
 
   @CheckPolicies((Ability) =>

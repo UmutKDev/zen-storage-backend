@@ -1034,6 +1034,70 @@ export class DirectoryCreateRequestModel {
 }
 
 /**
+ * Start an async PLAIN (non-encrypted) directory creation. Conflict detection
+ * (FAIL→409 / SKIP / KEEP_BOTH / REPLACE) runs synchronously before a job is
+ * enqueued; only the S3 placeholder write is deferred to the worker. Encrypted
+ * directories must use DirectoryCreateRequestModel (passphrase via header).
+ */
+export class DirectoryCreateStartRequestModel {
+  @ApiProperty({ description: 'Directory path to create' })
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => S3KeyConverter(value))
+  Path: string;
+
+  @ApiProperty({ required: false, enum: ConflictResolutionStrategy })
+  @IsOptional()
+  @IsEnum(ConflictResolutionStrategy)
+  ConflictStrategy?: ConflictResolutionStrategy;
+}
+
+export class DirectoryCreateStartResponseModel {
+  @Expose()
+  @ApiProperty({
+    description:
+      'BullMQ job id. Empty string when the create was a no-op (SKIP onto an existing folder) — nothing was enqueued.',
+  })
+  JobId: string;
+
+  @Expose()
+  @ApiProperty({ description: 'Resolved directory path the worker will create' })
+  Path: string;
+}
+
+export class DirectoryCreateStatusRequestModel {
+  @ApiProperty({ description: 'Job ID returned by directory create start' })
+  @IsString()
+  @IsNotEmpty()
+  JobId: string;
+}
+
+export class DirectoryCreateStatusResponseModel {
+  @Expose()
+  @ApiProperty()
+  JobId: string;
+
+  @Expose()
+  @ApiProperty({ enum: ArchiveJobState, description: 'Current BullMQ job state' })
+  Status: string;
+
+  @Expose()
+  @ApiProperty({
+    required: false,
+    description: 'Computed completion percentage (0-100)',
+  })
+  Percentage?: number;
+
+  @Expose()
+  @ApiProperty({ required: false, description: 'Resolved directory path' })
+  Path?: string;
+
+  @Expose()
+  @ApiProperty({ required: false })
+  Error?: string;
+}
+
+/**
  * Request model for renaming a directory.
  * For encrypted directories, passphrase must be provided via X-Folder-Passphrase header.
  */

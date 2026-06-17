@@ -361,62 +361,21 @@ export class CloudDirectoryService {
       );
     }
 
-    // Conflict detection for non-encrypted directories
+    // Conflict detection for non-encrypted directories (shared with the async
+    // create-Start path so both run the same interactive 409/SKIP/KEEP_BOTH flow).
     if (!IsEncrypted) {
-      const fullPrefix = EnsureTrailingSlash(
-        KeyBuilder([GetStorageOwnerId(User), normalizedPath]),
+      const resolved = await this.ResolvePlainDirectoryTarget(
+        normalizedPath,
+        ConflictStrategy,
+        User,
       );
-      const exists =
-        await this.CloudConflictService.CheckDirectoryExists(fullPrefix);
-      if (exists) {
-        const strategy = ConflictStrategy ?? ConflictResolutionStrategy.FAIL;
-
-        if (strategy === ConflictResolutionStrategy.FAIL) {
-          throw new HttpException(
-            plainToInstance(ConflictDetailsResponseModel, {
-              Conflicts: [
-                this.CloudConflictService.BuildConflictDetail(
-                  {
-                    Name: normalizedPath.split('/').pop() || '',
-                    Key: normalizedPath,
-                    IsDirectory: true,
-                  },
-                  {
-                    Name: normalizedPath.split('/').pop() || '',
-                    Key: normalizedPath,
-                    IsDirectory: true,
-                  },
-                ),
-              ],
-              TotalItems: 1,
-              ConflictCount: 1,
-            }),
-            HttpStatus.CONFLICT,
-          );
-        }
-
-        if (strategy === ConflictResolutionStrategy.SKIP) {
-          return plainToInstance(DirectoryResponseModel, {
-            Path: normalizedPath,
-            IsEncrypted: false,
-          });
-        }
-
-        if (strategy === ConflictResolutionStrategy.KEEP_BOTH) {
-          const resolvedFull =
-            await this.CloudConflictService.GenerateKeepBothKey(
-              fullPrefix,
-              true,
-            );
-          const ownerPrefix = GetStorageOwnerId(User) + '/';
-          const newRelativePath = resolvedFull.startsWith(ownerPrefix)
-            ? resolvedFull.slice(ownerPrefix.length)
-            : resolvedFull;
-          normalizedPath = NormalizeDirectoryPath(newRelativePath);
-        }
-
-        // REPLACE: continue (directory already exists, just proceed)
+      if (resolved.skip) {
+        return plainToInstance(DirectoryResponseModel, {
+          Path: resolved.path,
+          IsEncrypted: false,
+        });
       }
+      normalizedPath = resolved.path;
     }
 
     if (IsEncrypted) {
@@ -471,6 +430,80 @@ export class CloudDirectoryService {
       Path: normalizedPath,
       IsEncrypted: false,
     });
+  }
+
+  /**
+   * Synchronous conflict detection + path resolution for PLAIN (non-encrypted)
+   * directory creation. Extracted so the async create path (the create-Start
+   * endpoint) can run the SAME interactive 409/SKIP/KEEP_BOTH/REPLACE flow before
+   * enqueuing the worker — only the S3 placeholder write is deferred. FAIL throws
+   * a 409 with ConflictDetailsResponseModel; SKIP onto an existing folder returns
+   * `{ skip: true }` (nothing to create); KEEP_BOTH returns the freshly-resolved
+   * sibling path; REPLACE / no-conflict returns the normalized path as-is.
+   */
+  async ResolvePlainDirectoryTarget(
+    Path: string,
+    ConflictStrategy: ConflictResolutionStrategy | undefined,
+    User: UserContext,
+  ): Promise<{ path: string; skip: boolean }> {
+    let normalizedPath = NormalizeDirectoryPath(Path);
+    if (!normalizedPath) {
+      throw new HttpException(
+        'Directory path is required',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const fullPrefix = EnsureTrailingSlash(
+      KeyBuilder([GetStorageOwnerId(User), normalizedPath]),
+    );
+    const exists =
+      await this.CloudConflictService.CheckDirectoryExists(fullPrefix);
+    if (exists) {
+      const strategy = ConflictStrategy ?? ConflictResolutionStrategy.FAIL;
+
+      if (strategy === ConflictResolutionStrategy.FAIL) {
+        throw new HttpException(
+          plainToInstance(ConflictDetailsResponseModel, {
+            Conflicts: [
+              this.CloudConflictService.BuildConflictDetail(
+                {
+                  Name: normalizedPath.split('/').pop() || '',
+                  Key: normalizedPath,
+                  IsDirectory: true,
+                },
+                {
+                  Name: normalizedPath.split('/').pop() || '',
+                  Key: normalizedPath,
+                  IsDirectory: true,
+                },
+              ),
+            ],
+            TotalItems: 1,
+            ConflictCount: 1,
+          }),
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      if (strategy === ConflictResolutionStrategy.SKIP) {
+        return { path: normalizedPath, skip: true };
+      }
+
+      if (strategy === ConflictResolutionStrategy.KEEP_BOTH) {
+        const resolvedFull =
+          await this.CloudConflictService.GenerateKeepBothKey(fullPrefix, true);
+        const ownerPrefix = GetStorageOwnerId(User) + '/';
+        const newRelativePath = resolvedFull.startsWith(ownerPrefix)
+          ? resolvedFull.slice(ownerPrefix.length)
+          : resolvedFull;
+        normalizedPath = NormalizeDirectoryPath(newRelativePath);
+      }
+
+      // REPLACE: continue (directory already exists, just proceed)
+    }
+
+    return { path: normalizedPath, skip: false };
   }
 
   async DirectoryRename(

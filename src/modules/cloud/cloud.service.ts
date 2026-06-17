@@ -59,6 +59,10 @@ import {
   DirectoryRevealRequestModel,
   DirectoryRevealResponseModel,
   DirectoryConcealRequestModel,
+  DirectoryCreateStartRequestModel,
+  DirectoryCreateStartResponseModel,
+  DirectoryCreateStatusRequestModel,
+  DirectoryCreateStatusResponseModel,
 } from './cloud.model';
 import {
   CloudDuplicateScanStartRequestModel,
@@ -74,6 +78,7 @@ import { CloudObjectService } from './cloud.object.service';
 import { CloudArchiveService } from './cloud.archive.service';
 import { CloudUploadService } from './cloud.upload.service';
 import { CloudDirectoryService } from './cloud.directory.service';
+import { CloudDirectoryJobService } from './cloud.directory-job.service';
 import { CloudUsageService } from './cloud.usage.service';
 import { CloudVersionService } from './cloud.version.service';
 import { CloudDuplicateService } from './cloud.duplicate.service';
@@ -98,6 +103,7 @@ export class CloudService {
     private readonly CloudArchiveService: CloudArchiveService,
     private readonly CloudUploadService: CloudUploadService,
     private readonly CloudDirectoryService: CloudDirectoryService,
+    private readonly CloudDirectoryJobService: CloudDirectoryJobService,
     private readonly CloudUsageService: CloudUsageService,
     private readonly CloudVersionService: CloudVersionService,
     private readonly CloudDuplicateService: CloudDuplicateService,
@@ -1005,6 +1011,33 @@ export class CloudService {
     );
     await this.CloudListService.InvalidateListCache(GetStorageOwnerId(User));
     return result;
+  }
+
+  /**
+   * Start an async PLAIN (non-encrypted) directory creation. Conflict detection
+   * (409/SKIP/KEEP_BOTH/REPLACE) runs synchronously in the job service before
+   * enqueuing; only the S3 placeholder write is deferred to the worker, which also
+   * replicates this method's cache invalidation. Encrypted folders still use the
+   * synchronous DirectoryCreate above (passphrase via header, never enqueued).
+   */
+  async DirectoryCreateStart(
+    model: DirectoryCreateStartRequestModel,
+    User: UserContext,
+    sessionToken?: string,
+  ): Promise<DirectoryCreateStartResponseModel> {
+    await this.EnsureDirectoryAccess(
+      model.Path,
+      GetStorageOwnerId(User),
+      sessionToken,
+    );
+    return this.CloudDirectoryJobService.DirectoryCreateStart(model, User);
+  }
+
+  async DirectoryCreateStatus(
+    model: DirectoryCreateStatusRequestModel,
+    User: UserContext,
+  ): Promise<DirectoryCreateStatusResponseModel> {
+    return this.CloudDirectoryJobService.DirectoryCreateStatus(model, User);
   }
 
   /**
