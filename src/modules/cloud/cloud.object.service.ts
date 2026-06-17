@@ -99,10 +99,12 @@ export class CloudObjectService {
         Key: KeyBuilder([GetStorageOwnerId(User), Key]),
       });
 
-      const url = await getSignedUrl(this.CloudS3Service.GetClient(), command, {
-        expiresIn:
-          ExpiresInSeconds || this.CloudS3Service.PresignedUrlExpirySeconds,
-      });
+      const url = await this.CloudS3Service.SignedUrlBuilder(
+        { Key: KeyBuilder([GetStorageOwnerId(User), Key]) },
+        true,
+        this.CloudS3Service,
+        ExpiresInSeconds ?? this.CloudS3Service.PresignedUrlExpirySeconds,
+      );
 
       return url;
     } catch (error) {
