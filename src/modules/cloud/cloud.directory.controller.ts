@@ -126,8 +126,11 @@ export class CloudDirectoryController {
     return this.cloudService.DirectoryCreateStart(model, user, sessionToken);
   }
 
+  // Reads go through the generic Cloud subject (CloudDirectory grants only
+  // Create/Update/Delete/Execute — no Read), matching the List endpoints.
+  // Guarding on Read+CloudDirectory 403s every poll (no one is granted it).
   @CheckPolicies((Ability) =>
-    Ability.can(CaslAction.Read, CaslSubject.CloudDirectory),
+    Ability.can(CaslAction.Read, CaslSubject.Cloud),
   )
   @ApiOperation({
     summary: 'Get directory-create job status',
