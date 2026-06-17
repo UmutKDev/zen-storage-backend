@@ -8,6 +8,7 @@ import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { CloudS3Service } from './cloud.s3.service';
 import { CloudVersionModel } from './cloud.model';
+import { EncodeCopySource } from '@common/helpers/cast.helper';
 
 @Injectable()
 export class CloudVersionService {
@@ -103,7 +104,7 @@ export class CloudVersionService {
     await this.CloudS3Service.Send(
       new CopyObjectCommand({
         Bucket: bucket,
-        CopySource: `${bucket}/${key}?versionId=${versionId}`,
+        CopySource: EncodeCopySource(bucket, key, versionId),
         Key: key,
         MetadataDirective: 'REPLACE',
         Metadata: head.Metadata || {},

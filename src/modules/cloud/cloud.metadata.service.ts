@@ -8,7 +8,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Readable } from 'stream';
 import sharp from 'sharp';
 import { CloudS3Service } from './cloud.s3.service';
-import { IsImageFile, PascalizeKeys } from '@common/helpers/cast.helper';
+import {
+  EncodeCopySource,
+  IsImageFile,
+  PascalizeKeys,
+} from '@common/helpers/cast.helper';
 
 @Injectable()
 export class CloudMetadataService {
@@ -71,7 +75,10 @@ export class CloudMetadataService {
 
         const newMetadata = this.SanitizeMetadataForS3(newMetadataRaw);
 
-        const copySource = `${this.CloudS3Service.GetBuckets().Storage}/${key}`;
+        const copySource = EncodeCopySource(
+          this.CloudS3Service.GetBuckets().Storage,
+          key,
+        );
 
         await this.CloudS3Service.Send(
           new PutObjectCommand({

@@ -24,7 +24,7 @@ import { CloudMetadataService } from './cloud.metadata.service';
 import { CloudObjectModelService } from './cloud.object-model.service';
 import { CloudConflictService } from './cloud.conflict.service';
 import { CloudVersionService } from './cloud.version.service';
-import { KeyBuilder } from '@common/helpers/cast.helper';
+import { EncodeCopySource, KeyBuilder } from '@common/helpers/cast.helper';
 import { GetStorageOwnerId } from './cloud.context';
 import {
   EnsureTrailingSlash,
@@ -339,14 +339,19 @@ export class CloudObjectService {
                 Key: sourceFullKey,
               }),
             );
-            const updatedMetadata = {
-              ...(head.Metadata || {}),
-              originalfilename: resolvedFileName,
-            };
+            // Sanitize before the copy: S3 user-metadata is sent as HTTP
+            // headers (x-amz-meta-*), which must be ASCII. SanitizeMetadataForS3
+            // base64-encodes any non-ASCII value (e.g. a Turkish filename) and
+            // is idempotent for already-encoded existing metadata.
+            const updatedMetadata =
+              this.CloudMetadataService.SanitizeMetadataForS3({
+                ...(head.Metadata || {}),
+                originalfilename: resolvedFileName,
+              });
             await this.CloudS3Service.Send(
               new CopyObjectCommand({
                 Bucket: bucket,
-                CopySource: `${bucket}/${sourceFullKey}`,
+                CopySource: EncodeCopySource(bucket, sourceFullKey),
                 Key: targetFullKey,
                 Metadata: updatedMetadata,
                 MetadataDirective: 'REPLACE',
@@ -362,7 +367,7 @@ export class CloudObjectService {
             await this.CloudS3Service.Send(
               new CopyObjectCommand({
                 Bucket: bucket,
-                CopySource: `${bucket}/${sourceFullKey}`,
+                CopySource: EncodeCopySource(bucket, sourceFullKey),
                 Key: targetFullKey,
               }),
             );
@@ -450,7 +455,7 @@ export class CloudObjectService {
         await this.CloudS3Service.Send(
           new CopyObjectCommand({
             Bucket: bucket,
-            CopySource: `${bucket}/${content.Key}`,
+            CopySource: EncodeCopySource(bucket, content.Key),
             Key: targetKey,
           }),
         );
@@ -594,10 +599,14 @@ export class CloudObjectService {
         );
         const existingMetadata = head.Metadata || {};
         sourceContentType = head.ContentType as string | undefined;
-        finalMetadataForS3 = {
+        // Re-sanitize the merged map: `originalfilename` is added raw above and
+        // S3 user-metadata travels as ASCII-only HTTP headers, so any non-ASCII
+        // value (e.g. a Turkish filename) must be base64-encoded here. The call
+        // is idempotent for already-encoded existing metadata values.
+        finalMetadataForS3 = this.CloudMetadataService.SanitizeMetadataForS3({
           ...existingMetadata,
           ...sanitizedProvidedMetadata,
-        };
+        });
         this.Logger.debug(
           `CloudObjectService.Update finalMetadata keys: ${Object.keys(
             finalMetadataForS3,
@@ -609,7 +618,7 @@ export class CloudObjectService {
         await this.CloudS3Service.Send(
           new CopyObjectCommand({
             Bucket: bucket,
-            CopySource: `${bucket}/${sourceKey}`,
+            CopySource: EncodeCopySource(bucket, sourceKey),
             Key: targetKey,
             Metadata: Object.keys(finalMetadataForS3).length
               ? finalMetadataForS3
@@ -671,7 +680,7 @@ export class CloudObjectService {
         await this.CloudS3Service.Send(
           new CopyObjectCommand({
             Bucket: bucket,
-            CopySource: `${bucket}/${sourceKey}`,
+            CopySource: EncodeCopySource(bucket, sourceKey),
             Key: sourceKey,
             Metadata: finalMetadataForS3,
             MetadataDirective: 'REPLACE',

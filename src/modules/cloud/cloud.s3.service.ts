@@ -2,6 +2,7 @@ import { _Object, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { InjectAws } from 'aws-sdk-v3-nest';
 import { Injectable } from '@nestjs/common';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { EncodeStorageKey } from '@common/helpers/cast.helper';
 
 @Injectable()
 export class CloudS3Service {
@@ -35,7 +36,7 @@ export class CloudS3Service {
   }
 
   GetUrl(key: string): string {
-    return `${this.PublicEndpoint}/${this.Buckets.Storage}/${key}`;
+    return `${this.PublicEndpoint}/${this.Buckets.Storage}/${EncodeStorageKey(key)}`;
   }
 
   BuildPath(

@@ -125,27 +125,71 @@ export const PascalizeKeys = (obj: any): any => {
 export const ToPascalCase = (str: string): string =>
   startCase(camelCase(str)).replace(/ /g, '');
 
-export const S3KeyConverter = (input: string): string => {
-  const trMap: Record<string, string> = {
-    ç: 'c',
-    ğ: 'g',
-    ı: 'i',
-    ö: 'o',
-    ş: 's',
-    ü: 'u',
-    Ç: 'C',
-    Ğ: 'G',
-    İ: 'I',
-    Ö: 'O',
-    Ş: 'S',
-    Ü: 'U',
-  };
+/**
+ * Percent-encode each path SEGMENT of a storage key, leaving the `/` separators
+ * literal. Use when a raw UTF-8 key must go into a URL path or an S3 header that
+ * the AWS SDK does not encode for us (`CopySource`, the public-URL builder).
+ */
+export const EncodeStorageKey = (key: string): string =>
+  key
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
 
-  return decodeURIComponent(input)
-    .replace(/^https?:\/\/[^/]+\//, '') // domain'i at
-    .replace(/[?#].*$/, '') // query ve fragment'i sil
-    .replace(/[çğıöşüÇĞİÖŞÜ]/g, (c) => trMap[c]) // Türkçe karakterleri dönüştür
-    .trim();
+/**
+ * Build the `CopySource` value for an S3 `CopyObjectCommand`.
+ *
+ * AWS SDK v3 percent-encodes the `Key`/`Prefix` params for every other command,
+ * but it sends `CopySource` (the `x-amz-copy-source` header) verbatim, so the
+ * caller must encode it. We encode each path SEGMENT (preserving the literal `/`
+ * separators that S3 requires) and append an encoded `?versionId=` suffix when a
+ * version is targeted. `encodeURIComponent` covers spaces, `#`, `?`, `+` and
+ * multibyte UTF-8 (e.g. Turkish letters). The bucket name is ASCII, left as-is.
+ */
+export const EncodeCopySource = (
+  bucket: string,
+  key: string,
+  versionId?: string,
+): string => {
+  const base = `${bucket}/${EncodeStorageKey(key)}`;
+  return versionId
+    ? `${base}?versionId=${encodeURIComponent(versionId)}`
+    : base;
+};
+
+/**
+ * Normalize an inbound storage key/path/name without losing information.
+ *
+ * Keys are stored as human-readable UTF-8 (the S3 SDK encodes them on the wire),
+ * so this no longer transliterates Turkish characters and no longer calls
+ * `decodeURIComponent` (which threw a URIError on any literal '%', e.g.
+ * "50% off.pdf"). It only: strips a full URL prefix + query/fragment when a real
+ * URL was passed, removes control characters (illegal in S3 keys and HTTP
+ * headers), and trims.
+ *
+ * Leading/trailing slashes are intentionally preserved: a root destination ("/")
+ * must stay non-empty so `@IsNotEmpty` on `DestinationKey` etc. still passes, and
+ * `KeyBuilder` normalizes slashes when it composes the final object key. It also
+ * deliberately does NOT re-normalize Unicode (no NFC/NFD) or transliterate, so the
+ * key's byte sequence is preserved — move/copy/delete/rename take their source key
+ * from the listing round-trip, so leaving the bytes untouched keeps them matching
+ * the stored object exactly, including objects created before this fix.
+ */
+export const S3KeyConverter = (input: string): string => {
+  if (input == null) return input;
+  let value = String(input);
+  if (/^https?:\/\//i.test(value)) {
+    value = value.replace(/^https?:\/\/[^/]+\//, '').replace(/[?#].*$/, '');
+  }
+  // Drop control characters (code points 0-31 and 127) which are illegal in S3
+  // keys and HTTP headers, using a code-point filter to keep source ASCII-only.
+  value = Array.from(value)
+    .filter((ch) => {
+      const code = ch.charCodeAt(0);
+      return code > 31 && code !== 127;
+    })
+    .join('');
+  return value.trim();
 };
 
 export const ExtensionFromMimeType = (mimeType: string): string | null => {

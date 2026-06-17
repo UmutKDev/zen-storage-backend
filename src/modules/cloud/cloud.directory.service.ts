@@ -43,7 +43,7 @@ import {
   HIDDEN_FOLDER_SESSION_TTL,
   HIDDEN_MANIFEST_CACHE_TTL,
 } from '@modules/redis/redis.ttl';
-import { KeyBuilder } from '@common/helpers/cast.helper';
+import { EncodeCopySource, KeyBuilder } from '@common/helpers/cast.helper';
 import { GetStorageOwnerId } from './cloud.context';
 import { EnsureTrailingSlash, NormalizeDirectoryPath } from './cloud.utils';
 import { CloudUsageService } from './cloud.usage.service';
@@ -306,7 +306,7 @@ export class CloudDirectoryService {
           await this.CloudS3Service.Send(
             new CopyObjectCommand({
               Bucket: bucket,
-              CopySource: `${bucket}/${content.Key}`,
+              CopySource: EncodeCopySource(bucket, content.Key),
               Key: destinationKey,
             }),
           );
