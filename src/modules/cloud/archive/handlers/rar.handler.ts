@@ -117,10 +117,7 @@ export class RarArchiveHandler implements ArchiveHandler {
 
     for (const file of files) {
       if (options?.ShouldCancel) {
-        const cancelled = await options.ShouldCancel();
-        if (cancelled) {
-          throw new Error('Archive extraction cancelled.');
-        }
+        await options.ShouldCancel();
       }
 
       const normalizedPath = NormalizeArchiveEntryPath(file.fileHeader.name);

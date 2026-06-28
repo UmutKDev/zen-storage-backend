@@ -648,6 +648,8 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
     ) as {
       EntriesProcessed?: number;
       TotalEntries?: number | null;
+      BytesRead?: number;
+      TotalBytes?: number;
     };
 
     const entriesProcessed =
@@ -656,12 +658,22 @@ export class CloudArchiveService implements OnModuleInit, OnModuleDestroy {
         : undefined;
     const totalEntries =
       progress.TotalEntries != null ? Number(progress.TotalEntries) : undefined;
+    const bytesRead =
+      typeof progress.BytesRead === 'number' ? progress.BytesRead : undefined;
+    const totalBytes =
+      typeof progress.TotalBytes === 'number' ? progress.TotalBytes : undefined;
+    // A streaming full-archive extract doesn't know its entry count up front
+    // (TotalEntries is null), so fall back to the byte ratio — the compressed
+    // total is always known. Without this the poll path reports no percentage
+    // and the client bar stays at 0% for the whole extract.
     const percentage =
       state === ArchiveJobState.COMPLETED
         ? 100
         : totalEntries && totalEntries > 0 && entriesProcessed != null
           ? Math.min(100, Math.round((entriesProcessed / totalEntries) * 100))
-          : undefined;
+          : totalBytes && totalBytes > 0 && bytesRead != null
+            ? Math.min(100, Math.round((bytesRead / totalBytes) * 100))
+            : undefined;
 
     return plainToInstance(CloudArchiveStatusResponseModel, {
       JobId,

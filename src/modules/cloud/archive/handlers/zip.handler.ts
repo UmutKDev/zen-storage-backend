@@ -108,7 +108,6 @@ export class ZipArchiveHandler implements ArchiveHandler {
         const cancelled = await options.ShouldCancel();
         if (cancelled) {
           entry.autodrain();
-          throw new Error('Archive extraction cancelled.');
         }
       }
 

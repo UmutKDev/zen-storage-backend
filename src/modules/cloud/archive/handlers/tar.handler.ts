@@ -110,7 +110,6 @@ export class TarArchiveHandler implements ArchiveHandler {
             const cancelled = await options.ShouldCancel();
             if (cancelled) {
               entryStream.resume();
-              reject(new Error('Archive extraction cancelled.'));
               return;
             }
           }
